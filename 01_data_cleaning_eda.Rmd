@@ -1,0 +1,678 @@
+---
+title: "Data Cleaning and Analysis"
+output: html_notebook
+---
+
+## Loading Required Libraries
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+```
+
+This code block loads the essential R packages required for the subsequent data analysis and visualization steps.
+
+-   **`dplyr`**: A powerful package for data manipulation, offering functions for filtering rows, selecting columns, arranging data, grouping, and summarizing. It significantly streamlines data wrangling tasks.
+
+-   **`tidyr`**: Designed for tidying data, which means structuring data in a way that makes it easy to work with. It's particularly useful for handling missing values and reshaping dataframes.
+
+-   **`ggplot2`**: The premier R package for creating static, high-quality data visualizations. It implements a grammar of graphics, allowing users to build complex plots layer by layer.
+
+-   **`patchwork`**: This package simplifies the process of combining multiple `ggplot2` plots into a single, cohesive layout, making it easier to arrange and present multiple visualizations together.
+
+## Reading and Inspecting Data
+
+```{r}
+census04 <- read.csv("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/Census4.csv")
+census05 <- read.csv("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/Census5.csv")
+```
+
+```{r}
+head(census04)
+head(census05)
+```
+
+Two main tree census datasets, `Census4_KhaoYai15May2025.csv` and `Census5_KhaoYai15May2025.csv`, are read into R data frames named `census04` and `census05`, respectively. The full file paths are specified.
+
+The `head()` function is then used immediately after loading each census dataset to display the first six rows. This provides a quick visual check of the data's structure, column names, and initial values, ensuring that the data has been imported correctly.
+
+```{r}
+data_conner <- read.csv("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/Corner_allplots.csv")
+```
+
+```{r}
+head(data_conner)
+```
+
+Additionally, `Corner_allplots.csv`, which likely contains supplementary information about the plot corners and locations, is read into `data_conner`, and its head is also displayed for inspection.
+
+## Data Validation and Deduplication
+
+```{r}
+nrow(census04)
+n_distinct(census04$Tag)
+nrow(census04 %>% distinct(Tag, StemTag))
+```
+
+```{r}
+nrow(census05)
+n_distinct(census05$Tag)
+nrow(census05 %>% distinct(Tag, StemTag))
+```
+
+This block performs initial data validation by quantifying the number of records and unique identifiers in each raw census dataset.
+
+-   `nrow(census04)` and `nrow(census05)`: These commands return the total number of rows (observations) in the `census04` and `census05` dataframes, respectively. This gives a raw count of all recorded entries.
+
+-   `n_distinct(census04$Tag)` and `n_distinct(census05$Tag)`: These commands count the number of unique `Tag` identifiers in each census. The `Tag` typically represents a unique identifier for an individual tree. Comparing this to `nrow()` can reveal if multiple entries exist for the same tree.
+
+-   `nrow(census04 %>% distinct(Tag, StemTag))` and `nrow(census05 %>% distinct(Tag, StemTag))`: These commands calculate the number of unique combinations of `Tag` and `StemTag`. The `StemTag` is used to distinguish multiple stems belonging to the same individual tree (`Tag`). This count represents the total number of unique tree stems recorded. Discrepancies between this count and `nrow()` would indicate duplicate entries for the same stem.
+
+```{r}
+duplicate_StemTags04 <- census04 %>%
+  count(Tag, StemTag) %>%
+  filter(n > 1) 
+
+duplicate_StemTags05 <- census05 %>%
+  count(Tag, StemTag) %>%
+  filter(n > 1) 
+
+nrow(duplicate_StemTags04)
+nrow(duplicate_StemTags05)
+```
+
+This segment identifies and quantifies duplicate tree stem entries within each census dataset.
+
+-   `census04 %>% count(Tag, StemTag)`: This pipes the `census04` dataframe to the `count()` function, which groups the data by `Tag` and `StemTag` and then counts the occurrences (`n`) of each unique combination.
+
+-   `filter(n > 1)`: This filters the results to keep only those `Tag`/`StemTag` combinations that appear more than once (i.e., `n` is greater than 1), effectively identifying duplicates.
+
+-   The results are stored in `duplicate_StemTags04` and `duplicate_StemTags05` for the respective census years.
+
+-   `nrow(duplicate_StemTags04)` and `nrow(duplicate_StemTags05)`: These lines then display the number of rows in the duplicate dataframes, indicating how many unique `Tag`/`StemTag` combinations were found to have duplicates.
+
+```{r}
+
+duplicate04 <- census04 %>%
+  semi_join(duplicate_StemTags04, by = c("Tag", "StemTag")) %>%
+  arrange(Tag, StemTag)
+
+duplicate05 <- census05 %>%
+  semi_join(duplicate_StemTags05, by = c("Tag", "StemTag")) %>%
+  arrange(Tag, StemTag)
+
+colSums(is.na(duplicate04))
+colSums(is.na(duplicate05))
+```
+
+This block extracts the full rows corresponding to the identified duplicate stem entries and then assesses missing values within these duplicates.
+
+-   `census04 %>% semi_join(duplicate_StemTags04, by = c("Tag", "StemTag"))`: This performs a `semi_join`, which keeps all rows from `census04` where the `Tag` and `StemTag` combination exists in the `duplicate_StemTags04` dataframe. This effectively extracts all original rows that are part of a duplicate set.
+
+-   `arrange(Tag, StemTag)`: The extracted duplicate rows are then arranged (sorted) by `Tag` and `StemTag` for easier inspection.
+
+-   The same process is applied to `census05` to create `duplicate05`.
+
+-   `colSums(is.na(duplicate04))` and `colSums(is.na(duplicate05))`: These commands calculate the sum of `NA` (missing) values for each column within the extracted duplicate dataframes. This helps to understand if missing data is prevalent in the duplicated entries, which might inform how to handle them during deduplication.
+
+```{r}
+census04_deDup <- census04 %>%
+  group_by(Tag, StemTag) %>%
+  mutate(n = n()) %>%
+  slice(1) %>%
+  mutate(across(where(is.numeric) & !any_of(c("n")), ~ ifelse(n > 1, 0.5, .))) %>%  
+  select(-n) %>%
+  ungroup()
+
+census05_deDup <- census05 %>%
+  group_by(Tag, StemTag) %>%
+  mutate(n = n()) %>%
+  slice(1) %>%
+  mutate(across(where(is.numeric) & !any_of(c("n")), ~ ifelse(n > 1, 0.5, .))) %>%  
+  select(-n) %>%
+  ungroup()
+
+nrow(census04_deDup)  
+nrow(census05_deDup)
+```
+
+This code block performs the actual deduplication of the census datasets, keeping only one record per unique stem and optionally marking values for originally duplicated entries.
+
+-   `group_by(Tag, StemTag)`: The dataframe is grouped by `Tag` and `StemTag`. This ensures that operations are performed independently for each unique tree stem.
+
+-   `mutate(n = n())`: A new column `n` is created within each group, storing the count of rows in that group. This `n` will be greater than 1 for duplicate entries.
+
+-   `slice(1)`: For each group, only the first row is retained. This is the core deduplication step, effectively removing all but one instance of each `Tag`/`StemTag` combination.
+
+-   `mutate(across(where(is.numeric) & !any_of(c("n")), ~ ifelse(n > 1, 0.5, .)))`: This is a more complex step. It applies a transformation `across` all numeric columns (excluding the newly created `n` column). For rows that were originally duplicates (where `n > 1`), the numeric values in these columns are set to `0.5`. For unique rows (`n == 1`), their original values (`.`) are retained. This might be used to flag or adjust measurements for entries that had duplicates, perhaps indicating a partial contribution or a flag for review.
+
+-   `select(-n)`: The temporary `n` column is removed.
+
+-   `ungroup()`: The grouping is removed.
+
+-   The processes are applied to both `census04` and `census05` to create `census04_deDup` and `census05_deDup`.
+
+-   `nrow(census04_deDup)` and `nrow(census05_deDup)`: The number of rows in the deduplicated dataframes are displayed to confirm the reduction in row count after deduplication.
+
+## Assessing Missing Values
+
+```{r}
+colSums(is.na(census04_deDup))
+colSums(is.na(census05_deDup))
+```
+
+These commands provide a summary of missing values across all columns in the deduplicated datasets.
+
+-   `colSums(is.na(dataframe))`: This function first converts the dataframe into a logical matrix where `TRUE` indicates an `NA` value and `FALSE` indicates a non-`NA` value. `colSums()` then sums these `TRUE` values (which are treated as 1) for each column, effectively counting the number of missing values in every column. This output helps identify which columns have missing data and to what extent.
+
+```{r}
+dbh_na_04 <- census04_deDup %>%
+  filter(is.na(DiamManCorr)) 
+
+dbh_na_05 <- census05_deDup %>%
+  filter(is.na(DiamManCorr))
+
+nrow(dbh_na_04)
+nrow(dbh_na_05)
+
+```
+
+This section specifically filters and counts entries where the `DiamManCorr` (DBH measurement) is missing in each deduplicated census dataset.
+
+-   `filter(is.na(DiamManCorr))`: This command selects all rows from `census04_deDup` (and `census05_deDup`) where the value in the `DiamManCorr` column is `NA`.
+
+-   The filtered results are stored in `dbh_na_04` and `dbh_na_05`.
+
+-   `nrow(dbh_na_04)` and `nrow(dbh_na_05)`: These lines display the total number of tree stems with missing DBH measurements in each census year, providing a crucial metric of data completeness for the primary measurement of interest.
+
+```{r}
+dbh_na_only04 <- dbh_na_04 %>%
+  anti_join(dbh_na_05, by = c("Tag", "StemTag"))
+
+
+dbh_na_only05 <- dbh_na_05 %>%
+  anti_join(dbh_na_04, by = c("Tag", "StemTag"))
+
+dbh_na_both <- inner_join(dbh_na_04, dbh_na_05, by = c("Tag", "StemTag"))
+```
+
+This block categorizes the tree stems with missing DBH values based on their presence in one or both census years.
+
+-   `dbh_na_only04`: This identifies stems that have missing DBH in `census04_deDup` but *do not* have missing DBH in `census05_deDup`. `anti_join` keeps rows from the left dataframe (`dbh_na_04`) that do not have a match in the right dataframe (`dbh_na_05`) based on the specified keys (`Tag`, `StemTag`). This helps identify DBH data that was lost or unrecorded specifically in census 4 but recorded in census 5.
+
+-   `dbh_na_only05`: Similarly, this identifies stems with missing DBH in `census05_deDup` but *not* in `census04_deDup`.
+
+-   `dbh_na_both`: This identifies stems that have missing DBH in *both* `census04_deDup` and `census05_deDup`. `inner_join` keeps only rows that have matching `Tag` and `StemTag` combinations in both `dbh_na_04` and `dbh_na_05`. These are typically stems that consistently lack DBH measurements across both census periods.
+
+```{r}
+head(dbh_na_only04)
+head(dbh_na_only05)
+head(dbh_na_both)
+```
+
+```{r}
+nrow(dbh_na_both)
+nrow(dbh_na_only04)
+nrow(dbh_na_only05)
+```
+
+```{r}
+n_distinct(dbh_na_both$Tag)
+n_distinct(dbh_na_only04$Tag)
+n_distinct(dbh_na_only05$Tag)
+```
+
+These commands count the number of *unique trees* (identified by `Tag`) that fall into each category of missing DBH. This is different from `nrow()` which counts stems. A single tree can have multiple stems, so this provides insight into the number of *individual trees* affected by missing DBH data.
+
+```{r}
+dbh_na_both_info <- census05_deDup %>%
+  inner_join(dbh_na_both, by = c("Tag", "StemTag"))
+
+dbh_na_both_info %>%
+  count(Codes) %>%
+  arrange(desc(n))
+```
+
+This block investigates the common reasons (Codes) for stems that have missing DBH measurements in *both* census years.
+
+-   `census05_deDup %>% inner_join(dbh_na_both, by = c("Tag", "StemTag"))`: This joins the `dbh_na_both` (stems missing DBH in both censuses) dataframe back with the full `census05_deDup` dataset. This step is redundant because `dbh_na_both` already contains the `Codes` column, as it was derived from the census data. A direct `dbh_na_both %>% count(Codes)` would suffice here.
+
+-   `count(Codes) %>% arrange(desc(n))`: This counts the frequency of each unique `Codes` value within the `dbh_na_both_info` (or simply `dbh_na_both`) dataframe and then arranges them in descending order of their counts. This helps identify the most common reasons (e.g., "dead", "broken", "missing") why DBH data was not recorded for these persistently missing stems.
+
+```{r}
+dbh_na_only04 %>%
+  count(Codes, sort = TRUE)
+
+dbh_na_only05 %>%
+  count(Codes, sort = TRUE)
+```
+
+These commands perform a similar analysis as the previous block, but for stems where DBH is missing in only one of the census years.
+
+-   `count(Codes, sort = TRUE)`: This directly counts the frequency of each `Codes` value within `dbh_na_only04` and `dbh_na_only05` respectively. `sort = TRUE` automatically sorts the results in descending order of frequency. This helps understand the reasons for transient missingness (e.g., a tree might have been recorded as 'broken' in census 4 but recovered or was measured in census 5).
+
+## Data Cleaning
+
+```{r}
+census04_clean <- census04_deDup %>%
+  filter(!is.na(DiamManCorr) & DiamManCorr >= 5)
+
+census05_clean <- census05_deDup %>%
+  filter(!is.na(DiamManCorr) & DiamManCorr >= 5)
+```
+
+This critical step performs the final cleaning of the census data, preparing it for AGB estimation by removing problematic entries.
+
+-   `filter(!is.na(DiamManCorr))`: This removes all rows where the `DiamManCorr` (DBH measurement) is missing (`NA`). These entries cannot be used for analyses requiring DBH.
+
+-   `DiamManCorr >= 5`: This further filters the data to include only trees with a `DiamManCorr` (DBH) of 5 centimeters or greater. This is a common practice in forest ecology to focus on trees above a certain size threshold, often considered "measurable" or "established" trees, and to exclude very small seedlings or saplings that might have high mortality rates or are not the focus of the study.
+
+-   The results are stored in `census04_clean` and `census05_clean`, which will be used for all subsequent analyses and visualizations.
+
+```{r}
+nrow(census04_clean)
+n_distinct(census04_clean$Tag)
+nrow(census04_clean %>% distinct(Tag, StemTag))
+
+nrow(census05_clean)
+n_distinct(census05_clean$Tag)
+nrow(census05_clean %>% distinct(Tag, StemTag))
+```
+
+## Data Visualization
+
+This section is dedicated to generating various visualizations to explore the species composition, abundance changes, and DBH distribution patterns within the cleaned tree census data for both census 4 and census 5.
+
+```{r}
+count_04 <- census04_clean %>%
+  group_by(GenusSpeciesCorr) %>%
+  summarise(count_2004 = n())
+
+count_05 <- census05_clean %>%
+  group_by(GenusSpeciesCorr) %>%
+  summarise(count_2005 = n())
+
+species_diff <- full_join(count_04, count_05, by = "GenusSpeciesCorr") %>%
+  replace_na(list(count_2004 = 0, count_2005 = 0)) %>%
+  mutate(diff = count_2005 - count_2004)
+top_increase <- species_diff %>%
+  arrange(desc(diff)) %>%
+  slice_head(n = 12)
+
+top_decrease <- species_diff %>%
+  arrange(diff) %>%
+  slice_head(n = 12)
+
+top_changes <- bind_rows(top_increase, top_decrease) %>%
+  mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = GenusSpeciesCorr[order(diff)]))
+
+```
+
+This block prepares the data to visualize changes in species abundance between census 4 and census 5.
+
+-   `count_04` and `count_05`: These data frames are created by grouping the cleaned census data (`census04_clean`, `census05_clean`) by `GenusSpeciesCorr` (corrected genus and species name) and then counting the number of occurrences (`n()`) for each species. This gives the total count of each species in each respective census year.
+
+-   `species_diff`: This data frame is created by performing a `full_join` on `count_04` and `count_05` by `GenusSpeciesCorr`. This ensures that all species present in either census are included. `replace_na()` is used to convert `NA` values (for species not present in a given year) to `0`. A `diff` column is then calculated as `count_2005 - count_2004`, indicating the net change in abundance for each species.
+
+-   `top_increase`: Selects the top 12 species with the largest positive `diff` (greatest increase in count).
+
+-   `top_decrease`: Selects the top 12 species with the largest negative `diff` (greatest decrease in count).
+
+-   `top_changes`: Combines `top_increase` and `top_decrease` into a single data frame. The `GenusSpeciesCorr` factor levels are then ordered based on their `diff` values, which will ensure that the subsequent bar chart is sorted meaningfully.
+
+### Changes in Species Abundance
+
+We compare the number of individuals for each species (`GenusSpeciesCorr`) between the Census 4 and Census 5. The top 12 species with the greatest increase and decrease in abundance are visualized using a horizontal bar chart.
+
+```{r}
+ggplot(top_changes, aes(x = GenusSpeciesCorr, y = diff, fill = diff > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Top 12 GenusSpecies with Highest Increase and Decrease in Tree Count",
+       x = "GenusSpecies",
+       y = "Change in Count") +
+  scale_fill_manual(values = c("#BF0000", "#2ECC71")) +
+  theme_minimal()
+
+```
+
+### Most Common Species (Census 4 vs Census 5)
+
+```{r}
+census04_species_count <- census04_clean %>%
+  distinct(Tag, .keep_all = TRUE) %>%  
+  group_by(GenusSpeciesCorr) %>%
+  summarise(Tree_Count = n()) %>%
+  mutate(Census = "4")
+
+census05_species_count <- census05_clean %>%
+  distinct(Tag, .keep_all = TRUE) %>%
+  group_by(GenusSpeciesCorr) %>%
+  summarise(Tree_Count = n()) %>%
+  mutate(Census = "5")
+
+combined_species_count <- bind_rows(census04_species_count, census05_species_count)
+
+top_species <- combined_species_count %>%
+  group_by(GenusSpeciesCorr) %>%
+  summarise(Total = sum(Tree_Count)) %>%
+  arrange(desc(Total)) %>%
+  slice_head(n = 12) %>%
+  pull(GenusSpeciesCorr)
+
+filtered_species_count <- combined_species_count %>%
+  filter(GenusSpeciesCorr %in% top_species)
+
+ggplot(filtered_species_count, aes(x = reorder(GenusSpeciesCorr, -Tree_Count), y = Tree_Count, fill = Census)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Top 12 Most Common GenusSpecies (Census 4 vs Census 5)",
+    x = "GenusSpecies",
+    y = "Number of Trees",
+    fill = "Census"
+  ) +
+  scale_fill_manual(values = c("4" = "#26C4B8", "5" = "#E75480")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+This block prepares the data to visualize the top 12 most common species in each census and compare their counts.
+
+-   `census04_species_count` and `census05_species_count`:
+
+```         
+-   `distinct(Tag, .keep_all = TRUE)`: Ensures that each *tree* (`Tag`) is counted only once, even if it has multiple stems. `.keep_all = TRUE` retains other columns.
+
+-   `group_by(GenusSpeciesCorr) %>% summarise(Tree_Count = n())`: Groups by species and counts the number of trees (`n()`) for each, storing it as `Tree_Count`.
+
+-   `mutate(Census = "4")` (or "5"): Adds a new column `Census` to identify the year.
+```
+
+-   `combined_species_count`: Row-binds (`bind_rows`) the two census species count data frames into one, enabling combined analysis.
+
+-   `top_species`:
+
+    -   `group_by(GenusSpeciesCorr) %>% summarise(Total = sum(Tree_Count))`: Groups the combined data by species and calculates the `Total` count across both censuses.
+
+    -   `arrange(desc(Total)) %>% slice_head(n = 12)`: Orders species by their total count in descending order and selects the top 12.
+
+    -   `pull(GenusSpeciesCorr)`: Extracts just the `GenusSpeciesCorr` names of these top 12 species as a character vector.
+
+-   `filtered_species_count`: Filters the `combined_species_count` to include only the rows corresponding to these `top_species`.
+
+### DBH Distribution by Species
+
+```{r}
+distribution_species04 <- census04_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%         
+  count(GenusSpeciesCorr, sort = TRUE) %>% 
+  slice_max(n, n = 12) %>%   
+  pull(GenusSpeciesCorr)
+
+species_order04 <- census04_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%
+  count(GenusSpeciesCorr, sort = TRUE) %>%
+  filter(GenusSpeciesCorr %in% distribution_species04) %>%
+  pull(GenusSpeciesCorr) %>%
+  rev() 
+```
+
+This block identifies the top 12 most abundant species in `census04_clean` and prepares their order for plotting DBH distributions.
+
+-   `distribution_species04`:
+
+```         
+-    `distinct(Tag, GenusSpeciesCorr)`: Selects unique tree-species combinations (ensuring each tree is counted once).
+
+-   `count(GenusSpeciesCorr, sort = TRUE)`: Counts the number of trees for each species and sorts them by count in descending order.
+
+-   `slice_max(n, n = 12)`: Selects the top 12 species based on their count.
+
+-   `pull(GenusSpeciesCorr)`: Extracts just the names of these top 12 species.
+```
+
+-   `species_order04`: This re-extracts the names of the top 12 species and then `rev()` (reverses) their order. This reversal is often done so that when `coord_flip()` is used in `ggplot`, the most abundant species appears at the top of the y-axis in the boxplot.
+
+```{r}
+
+ggplot(
+  census04_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species04) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order04)),
+  aes(x = GenusSpeciesCorr, y = DiamManCorr)
+) +
+  geom_boxplot(fill = "#26C4B8", outlier.color = "#E6B800", outlier.size = 1) +
+  coord_flip() +
+  labs(
+    title = "DBH Distribution by GenusSpecies (Census 4)",
+    x = "GenusSpecies",
+    y = "DBH (cm)"
+  ) +
+  theme_minimal(base_size = 12)
+
+```
+
+This code generates a boxplot visualizing the distribution of DBH for the top 12 most abundant species in Census 4, using a linear scale for DBH.
+
+```{r}
+ggplot(
+  census04_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species04) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order04)),
+  aes(x = GenusSpeciesCorr, y = DiamManCorr)
+) +
+  geom_boxplot(fill = "#26C4B8", outlier.color = "#E6B800", outlier.size = 1) +
+  coord_flip() +
+  scale_y_log10() +  # ใช้ log scale ฐาน 10
+  labs(
+    title = "DBH Distribution by Species (Census 4) [Log Scale]",
+    x = "GenusSpecies",
+    y = "DBH (cm, log scale)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+This code generates another boxplot for Census 4, identical to the previous one, but with a **logarithmic scale for the DBH (y-axis)**.
+
+-   `scale_y_log10()`: This is the key difference. It transforms the y-axis (DBH) using a base-10 logarithm. This is highly useful for tree diameter data, which is often right-skewed (many small trees, few large ones). A log scale helps to:
+
+```         
+-    **Visualize the full range of DBH values**: It compresses the larger values, making it easier to see the distribution among smaller trees.
+
+-    **Reveal patterns in relative change**: Equal changes on a log scale represent equal proportional changes on the original scale.
+
+-    **Better handle outliers**: Outliers on a linear scale might become less extreme on a log scale, or true outliers become more apparent.
+```
+
+```{r}
+distribution_species05 <- census05_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%         
+  count(GenusSpeciesCorr, sort = TRUE) %>% 
+  slice_max(n, n = 12) %>%   
+  pull(GenusSpeciesCorr)
+
+species_order05 <- census05_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%
+  count(GenusSpeciesCorr, sort = TRUE) %>%
+  filter(GenusSpeciesCorr %in% distribution_species05) %>%
+  pull(GenusSpeciesCorr) %>%
+  rev() 
+
+ggplot(
+  census05_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species05) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order05)),
+  aes(x = GenusSpeciesCorr, y = DiamManCorr)
+) +
+  geom_boxplot(fill = "#E75480", outlier.color = "#E6B800", outlier.size = 1) +
+  coord_flip() +
+  labs(
+    title = "DBH Distribution by GenusSpecies (Census 5)",
+    x = "GenusSpecies",
+    y = "DBH (cm)"
+  ) +
+  theme_minimal(base_size = 12)
+
+```
+
+This block is identical in function to the one for Census 4, but it calculates the `distribution_species05` and `species_order05` based on the `census05_clean` data. This ensures that the boxplots for Census 5 correctly display its own top 12 most abundant species and their order.
+
+```{r}
+ggplot(
+  census04_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species05) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order04)),
+  aes(x = GenusSpeciesCorr, y = DiamManCorr)
+) +
+  geom_boxplot(fill = "#E75480", outlier.color = "#E6B800", outlier.size = 1) +
+  coord_flip() +
+  scale_y_log10() +  # ใช้ log scale ฐาน 10
+  labs(
+    title = "DBH Distribution by Species (Census 5) [Log Scale]",
+    x = "GenusSpecies",
+    y = "DBH (cm, log scale)"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+```
+
+This code generates a boxplot for the DBH distribution of the top 12 species in Census 5, using a **logarithmic scale** for DBH. Similar to the Census 4 log-scale plot, this helps visualize the distribution across the wide range of tree diameters in census 5.
+
+### Density Plots of DBH for Top Species
+
+Kernel density plots are generated to show the distribution of DBH for the top 12 species. The plots are faceted by species and presented on both linear and log-transformed scales. This visualization is performed separately for both the Census 4 and Census 5 datasets, allowing direct comparison of DBH distributions across years.
+
+```{r}
+species_order04 <- census04_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%
+  count(GenusSpeciesCorr, sort = TRUE) %>%
+  filter(GenusSpeciesCorr %in% distribution_species04) %>%
+  pull(GenusSpeciesCorr)
+
+
+ggplot(
+  census04_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species04) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order04)),
+  aes(x = DiamManCorr, fill = GenusSpeciesCorr)
+) +
+  geom_density(fill = "#26C4B8", alpha = 0.6) +
+  facet_wrap(~ GenusSpeciesCorr, scales = "free") +
+  labs(
+    title = "Density Plot of DBH by Species (Census 4)",
+    x = "DBH (cm)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+census04_dis <- census04_clean %>%
+  mutate(
+    DiamManCorr_log = log(DiamManCorr),
+    GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order04)
+  )
+
+ggplot(
+  filter(census04_dis, GenusSpeciesCorr %in% distribution_species04),
+  aes(x = DiamManCorr_log)
+) +
+  geom_density(fill = "#26C4B8", alpha = 0.6) +  # สีฟ้า (Dodger Blue)
+  facet_wrap(~ GenusSpeciesCorr, scales = "free") +
+  labs(
+    title = "Log-Transformed DBH Density by Species (Census 4)",
+    x = "log(DBH)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "none")
+```
+
+```{r}
+
+species_order05 <- census05_clean %>%
+  distinct(Tag, GenusSpeciesCorr) %>%
+  count(GenusSpeciesCorr, sort = TRUE) %>%
+  filter(GenusSpeciesCorr %in% distribution_species05) %>%
+  pull(GenusSpeciesCorr)
+
+
+ggplot(
+  census05_clean %>%
+    filter(GenusSpeciesCorr %in% distribution_species04) %>%
+    mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order05)),
+  aes(x = DiamManCorr, fill = GenusSpeciesCorr)
+) +
+  geom_density(fill = "#E75480", alpha = 0.6) +
+  facet_wrap(~ GenusSpeciesCorr, scales = "free") +
+  labs(
+    title = "Density Plot of DBH by Species (Census 5)",
+    x = "DBH (cm)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+census05_dis <- census05_clean %>%
+  mutate(
+    DiamManCorr_log = log(DiamManCorr),
+    GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order05)
+  )
+
+ggplot(
+  filter(census05_dis, GenusSpeciesCorr %in% distribution_species05),
+  aes(x = DiamManCorr_log)
+) +
+  geom_density(fill = "#E75480", alpha = 0.6) +  # สีฟ้า (Dodger Blue)
+  facet_wrap(~ GenusSpeciesCorr, scales = "free") +
+  labs(
+    title = "Log-Transformed DBH Density by Species (Census 5)",
+    x = "log(DBH)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+census04_dis <- census04_clean %>%
+  filter(GenusSpeciesCorr %in% distribution_species04) %>%
+  mutate(DiamManCorr_log = log(DiamManCorr), census = "Census 4")
+
+census05_dis <- census05_clean %>%
+  filter(GenusSpeciesCorr %in% distribution_species05) %>%
+  mutate(DiamManCorr_log = log(DiamManCorr), census = "Census 5")
+
+combined_data <- bind_rows(census04_dis, census05_dis)
+
+species_order <- combined_data %>%
+  distinct(Tag, GenusSpeciesCorr) %>%
+  count(GenusSpeciesCorr, sort = TRUE) %>%
+  pull(GenusSpeciesCorr) 
+
+combined_data <- combined_data %>%
+  mutate(GenusSpeciesCorr = factor(GenusSpeciesCorr, levels = species_order))
+
+ggplot(combined_data, aes(x = DiamManCorr_log, fill = census)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ GenusSpeciesCorr, scales = "free") +
+  labs(
+    title = "Log-Transformed DBH Density by Species: Census 4 vs Census 5",
+    x = "log(DBH)",
+    y = "Density",
+    fill = "Census"
+  ) +
+  scale_fill_manual(values = c("Census 4" = "#26C4B8", "Census 5" = "#E75480")) +
+  theme_minimal(base_size = 10)
+
+```

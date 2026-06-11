@@ -1,0 +1,1236 @@
+---
+title: "LiDAR"
+output: html_notebook
+---
+
+```{r}
+library(sf)
+library(terra)
+library(ggplot2)
+library(sp)
+library(dplyr)
+library(purrr)
+library(knitr)
+library(kableExtra)
+library(raster)
+library(fields)
+library(RColorBrewer)
+```
+
+```{r}
+CHMlidar = rast("C:/Users/rakir/OneDrive/Desktop/AGB_Project/LiDAR/totCHM_2017.tif")
+CHMlidar[CHMlidar<0]=0 
+plot(CHMlidar)
+str(CHMlidar)
+```
+
+```{r}
+CHMlidar2024 = rast("C:/Users/rakir/OneDrive/Desktop/AGB_Project/LiDAR/totCHM_2024.tif")
+CHMlidar2024[CHMlidar2024<0]=0
+plot(CHMlidar2024)
+```
+
+```{r}
+boundary = st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/LiDAR/boundary_raster.shp")
+plot(boundary)
+```
+
+```{r}
+CHMlidar <- crop(CHMlidar, vect(boundary))
+plot(CHMlidar)
+CHMlidar2024 <- crop(CHMlidar2024, vect(boundary))
+plot(CHMlidar2024)
+```
+
+```{r}
+CHMlidar <- mask(CHMlidar, vect(boundary))
+plot(CHMlidar, main = "2017")
+CHMlidar2024 <- mask(CHMlidar2024, vect(boundary))
+plot(CHMlidar2024, main = "2024")
+```
+
+```{r}
+AGBplots_0.25ha=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_0.25HA_perHA.shp")
+
+AGBplots_1ha=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_01HA_perHA.shp")
+
+AGBplots_0.25ha_C5=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_0.25HA_perHA.shp")
+
+AGBplots_1ha_C5=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_01HA_perHA.shp")
+
+```
+
+```{r}
+CHM_metrics <- function(AGBplots, CHMlidar) {
+  colnames(AGBplots)[colnames(AGBplots) == "AGB_s__"] <- "AGB_ha"
+  
+  meanTCH <- terra::extract(CHMlidar, AGBplots, fun = mean, na.rm = TRUE)
+  H40 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.4, na.rm = TRUE))
+  H50 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.5, na.rm = TRUE))
+  H60 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.6, na.rm = TRUE))
+  H70 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.7, na.rm = TRUE))
+  H80 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.8, na.rm = TRUE))
+  H90 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.9, na.rm = TRUE))
+  H98 <- terra::extract(CHMlidar, AGBplots, 
+                        fun = function(x) quantile(x, probs = 0.98, na.rm = TRUE))
+  
+  AGBplots$meanTCH <- meanTCH[, 2]
+  AGBplots$H40 <- H40[, 2]
+  AGBplots$H50 <- H50[, 2]
+  AGBplots$H60 <- H60[, 2]
+  AGBplots$H70 <- H70[, 2]
+  AGBplots$H80 <- H80[, 2]
+  AGBplots$H90 <- H90[, 2]
+  AGBplots$H98 <- H98[, 2]
+  
+  return(AGBplots)
+}
+```
+
+```{r}
+AGBplots_0.25ha <- CHM_metrics(AGBplots_0.25ha, CHMlidar)
+
+AGBplots_1ha <- CHM_metrics(AGBplots_1ha, CHMlidar)
+
+AGBplots_0.25ha_C5 <- CHM_metrics(AGBplots_0.25ha_C5, CHMlidar)
+
+AGBplots_1ha_C5 <- CHM_metrics(AGBplots_1ha_C5, CHMlidar)
+```
+
+```{r}
+Predict_AGB <- function(AGBplots, metric) {
+  
+  ## Build a LiDAR-AGB model
+  mod=lm(log(AGB_ha)~log(metric), data=AGBplots)
+  summary(mod)
+
+  rse=summary(mod)$sigma
+
+  AGBpredicted=exp(0.5*rse^2+predict(mod))
+
+  RMSE= sqrt(sum((AGBpredicted-AGBplots$AGB_ha)^2)/length(AGBpredicted))
+  RMSErel=100*RMSE/mean(AGBplots$AGB_ha)
+
+  # Print RMSE and relative RMSE
+  # print(paste("RSE:", rse))
+  # print(paste("RMSE:", RMSE))
+  print(paste("Relative RMSE:", RMSErel))
+
+  return(AGBpredicted)
+  }
+```
+
+```{r}
+AGBplots_0.25ha$AGBpred_H98 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H98)
+AGBplots_0.25ha$AGBpred_H90 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H90)
+AGBplots_0.25ha$AGBpred_H80 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H80)
+AGBplots_0.25ha$AGBpred_H70 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H70)
+AGBplots_0.25ha$AGBpred_H60 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H60)
+AGBplots_0.25ha$AGBpred_H50 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H50)
+AGBplots_0.25ha$AGBpred_H40 <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$H40)
+AGBplots_0.25ha$AGBpred_meanTCH <- Predict_AGB(AGBplots_0.25ha, AGBplots_0.25ha$meanTCH)
+```
+
+```{r}
+AGBplots_1ha$AGBpred_H98 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H98)
+AGBplots_1ha$AGBpred_H90 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H90)
+AGBplots_1ha$AGBpred_H80 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H80)
+AGBplots_1ha$AGBpred_H70 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H70)
+AGBplots_1ha$AGBpred_H60 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H60)
+AGBplots_1ha$AGBpred_H50 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H50)
+AGBplots_1ha$AGBpred_H40 <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$H40)
+AGBplots_1ha$AGBpred_meanTCH <- Predict_AGB(AGBplots_1ha, AGBplots_1ha$meanTCH)
+```
+
+```{r}
+AGBplots_0.25ha_C5$AGBpred_H98 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H98)
+AGBplots_0.25ha_C5$AGBpred_H90 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H90)
+AGBplots_0.25ha_C5$AGBpred_H80 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H80)
+AGBplots_0.25ha_C5$AGBpred_H70 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H70)
+AGBplots_0.25ha_C5$AGBpred_H60 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H60)
+AGBplots_0.25ha_C5$AGBpred_H50 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H50)
+AGBplots_0.25ha_C5$AGBpred_H40 <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$H40)
+AGBplots_0.25ha_C5$AGBpred_meanTCH <- Predict_AGB(AGBplots_0.25ha_C5, AGBplots_0.25ha_C5$meanTCH)
+```
+
+```{r}
+AGBplots_1ha_C5$AGBpred_H98 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H98)
+AGBplots_1ha_C5$AGBpred_H90 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H90)
+AGBplots_1ha_C5$AGBpred_H80 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H80)
+AGBplots_1ha_C5$AGBpred_H70 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H70)
+AGBplots_1ha_C5$AGBpred_H60 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H60)
+AGBplots_1ha_C5$AGBpred_H50 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H50)
+AGBplots_1ha_C5$AGBpred_H40 <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$H40)
+AGBplots_1ha_C5$AGBpred_meanTCH <- Predict_AGB(AGBplots_1ha_C5, AGBplots_1ha_C5$meanTCH)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_meanTCH)),
+     main = "Census 4 : 0.25 ha (mean TCH)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_meanTCH)),
+     main = "Census 5 : 0.25 ha (mean TCH)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_meanTCH)),
+     main = "Census 4 : 1 ha (mean TCH)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_meanTCH)),
+     main = "Census 5 : 1 ha (mean TCH)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H98)),
+     #asp=1, 
+     main = "Census 4 : 0.25 ha (H98)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H98)),
+     #asp=1, 
+     main = "Census 5 : 0.25 ha (H98)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+      xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+      ylim = c(0,max(AGBplots_1ha$AGBpred_H98)),
+     #asp=1,
+     main = "Census 4 : 1 ha (H98)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+      xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+      ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H98)),
+     #asp=1,
+     main = "Census 5 : 1 ha (H98)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H90)),
+     main = "Census 4 : 0.25 ha (H90)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H90)),
+     main = "Census 5 : 0.25 ha (H90)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H90)),
+     main = "Census 4 : 1 ha (H90)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H90)),
+     main = "Census 5 : 1 ha (H90)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3,
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H80)),
+     main = "Census 4 : 0.25 ha (H80)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3,
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H80)),
+     main = "Census 5 : 0.25 ha (H80)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H80)),
+     #asp=1,
+     main = "Census 4 : 1 ha (H80)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H80)),
+     #asp=1,
+     main = "Census 5 : 1 ha (H80)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H70)),
+     main = "Census 4 : 0.25 ha (H70)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H70)),
+     main = "Census 5 : 0.25 ha (H70)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H70)),
+     main = "Census 4 : 1 ha (H70)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H70)),
+     main = "Census 5 : 1 ha (H70)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H60)),
+     main = "Census 4 : 0.25 ha (H60)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H60)),
+     main = "Census 5 : 0.25 ha (H60)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H60)),
+     main = "Census 4 : 1 ha (H60)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H60)),
+     main = "Census 5 : 1 ha (H60)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H50)),
+     main = "Census 4 : 0.25 ha (H50)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H50)),
+     main = "Census 5 : 0.25 ha (H50)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H50)),
+     main = "Census 4 : 1 ha (H50)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H50)),
+     main = "Census 5 : 1 ha (H50)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_0.25ha$AGB_ha,AGBplots_0.25ha$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha$AGBpred_H40)),
+     main = "Census 4 : 0.25 ha (H40)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_C5$AGB_ha,AGBplots_0.25ha_C5$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_C5$AGBpred_H40)),
+     main = "Census 5 : 0.25 ha (H40)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha$AGB_ha,AGBplots_1ha$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha$AGBpred_H40)),
+     main = "Census 4 : 1 ha (H40)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_C5$AGB_ha,AGBplots_1ha_C5$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_C5$AGBpred_H40)),
+     main = "Census 5 : 1 ha (H40)")
+abline(a=0,b=1)
+```
+
+```{r}
+################################################################################
+## Build a LiDAR-AGB model
+mod=lm(log(AGB_ha)~log(meanTCH), data=AGBplots_0.25ha)
+mod=lm(log(AGB_ha)~log(meanTCH), data=AGBplots_1ha)
+summary(mod)
+
+```
+
+```{r}
+rse=summary(mod)$sigma
+```
+
+```{r}
+##Apply the model to the whole CHM
+FunPredAGB=function(x) exp(mod$coefficients[1]+0.5*rse^2+mod$coefficients[2]*log(x))
+```
+
+```{r}
+Rast_TCHm=aggregate(CHMlidar,50,mean,na.rm=T)
+Rast_TCHm_2024=aggregate(CHMlidar2024,50,mean,na.rm=T)
+```
+
+```{r}
+AGBmap = lapp(Rast_TCHm, fun = FunPredAGB)
+AGBmap_2024 = lapp(Rast_TCHm_2024, fun = FunPredAGB)
+```
+
+```{r}
+
+plot(AGBmap, plg = list(title = 'Predicted AGB\n(Mg/ha)',title.cex = 0.9), main = "2017")
+plot(AGBmap_2024, plg = list(title = 'Predicted AGB\n(Mg/ha)',title.cex = 0.9), main = "2024")
+
+```
+
+```{r}
+#Define common color scale
+vmin <- 0      # Minimum value
+vmax <- 800    # Maximum value
+colors <- terrain.colors(100)  # Define a shared color palette
+```
+
+```{r}
+
+#Save plot as PNG
+png("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/AGB_predict.png", width = 3000, height = 1500, res = 300)
+
+```
+
+```{r}
+#Layout for two plots
+par(mfrow = c(1, 2), mar = c(4, 4, 2, 10), oma =c(0, 0, 0, 5))  # Increase the right margin for the legend
+
+```
+
+```{r}
+layout(matrix(c(1, 2), nrow = 2), heights = c(5, 1.2))  # ปรับความสูง legend น้อยลง
+
+# วาดแผนที่
+par(mar = c(2, 4, 4, 2))  # กำหนดขอบภาพ
+plot(AGBmap,
+     main = "AGB from LiDAR (2017)",
+     col = colors,
+     zlim = c(vmin, vmax),
+     legend = FALSE)
+
+# วาด legend ล่างแบบสั้นลง
+par(mar = c(3, 4, 1, 2))  # เพิ่มพื้นที่ด้านล่าง
+
+# กำหนดตำแหน่ง legend ด้วย smallplot:
+# smallplot = c(x1, x2, y1, y2) → ค่าระหว่าง 0 ถึง 1 (ของหน้าต่างกราฟ)
+# เช่น 0.3 ถึง 0.7 หมายถึงให้ legend กว้าง 40% ตรงกลางล่าง
+image.plot(legend.only = TRUE,
+           zlim = c(vmin, vmax),
+           col = colors,
+           horizontal = TRUE,
+           smallplot = c(0.3, 0.7, 0.01, 0.045),  # → แถบสั้น + ตำแหน่งต่ำ
+           legend.args = list(
+             text = "Predicted AGB (Mg/ha)",
+             side = 1,       # วาง text ด้านล่าง
+             font = 2,
+             line = 2.5,
+             cex = 1))
+```
+
+```{r}
+layout(matrix(c(1, 2), nrow = 2), heights = c(5, 1.2))  # ปรับความสูง legend น้อยลง
+
+# วาดแผนที่
+par(mar = c(2, 4, 4, 2))  # กำหนดขอบภาพ
+plot(AGBmap_2024,
+     main = "AGB from LiDAR (2024)",
+     col = colors,
+     zlim = c(vmin, vmax),
+     legend = FALSE)
+
+# วาด legend ล่างแบบสั้นลง
+par(mar = c(3, 4, 1, 2))  # เพิ่มพื้นที่ด้านล่าง
+
+# กำหนดตำแหน่ง legend ด้วย smallplot:
+# smallplot = c(x1, x2, y1, y2) → ค่าระหว่าง 0 ถึง 1 (ของหน้าต่างกราฟ)
+# เช่น 0.3 ถึง 0.7 หมายถึงให้ legend กว้าง 40% ตรงกลางล่าง
+image.plot(legend.only = TRUE,
+           zlim = c(vmin, vmax),
+           col = colors,
+           horizontal = TRUE,
+           smallplot = c(0.3, 0.7, 0.01, 0.045),  # → แถบสั้น + ตำแหน่งต่ำ
+           legend.args = list(
+             text = "Predicted AGB (Mg/ha)",
+             side = 1,       # วาง text ด้านล่าง
+             font = 2,
+             line = 2.5,
+             cex = 1))
+```
+
+```{r}
+v <- AGBplots_0.25ha
+r <- raster(extent(v), res = 50)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+
+plot(r_raster,
+     main = "AGB from LiDAR 2017 (0.25 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(60, 320))
+
+```
+
+```{r}
+v <- AGBplots_1ha
+r <- raster(extent(v), res = 100)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB from LiDAR 2017 (1 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(120, 320))  # กำหนดช่วงสีจาก 0 ถึง 200 (ปรับได้ตามต้องการ)
+```
+
+```{r}
+v <- AGBplots_0.25ha_C5
+r <- raster(extent(v), res = 50)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB from LiDAR 2024 (0.25 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(60, 320))
+```
+
+```{r}
+v <- AGBplots_1ha_C5
+r <- raster(extent(v), res = 100)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB from LiDAR 2024 (1 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(120, 320)) 
+```
+
+```{r}
+AGBplots_1ha_C5$AGBpred_meanTCH_comp <- AGBplots_1ha_C5$AGBpred_meanTCH - AGBplots_1ha$AGBpred_meanTCH
+
+AGBplots_1ha_C5$AGBpred_meanTCH_pct_change <- 
+  100 * (AGBplots_1ha_C5$AGBpred_meanTCH - AGBplots_1ha$AGBpred_meanTCH) / AGBplots_1ha$AGBpred_meanTCH
+
+v <- AGBplots_1ha_C5
+r <- raster(extent(v), res = 100)
+r_pct_change <- rasterize(v, r, field = "AGBpred_meanTCH_pct_change")
+
+# สีแดง-ขาว-เขียว (แดง = ลด %, เขียว = เพิ่ม %)
+col_diff <- colorRampPalette(c("red", "white", "darkgreen"))(100)
+
+# หา min max เปอร์เซ็นต์ เพื่อใช้ scale สี
+min_val <- minValue(r_pct_change)
+max_val <- maxValue(r_pct_change)
+
+# ทำ scale สีสมมาตรรอบ 0 (ถ้าต้องการ)
+range_val <- max(abs(min_val), abs(max_val))
+zlim <- c(-range_val, range_val)
+
+# กำหนด breaks ให้สีไล่จาก min ถึง max
+breaks <- seq(zlim[1], zlim[2], length.out = length(col_diff) + 1)
+
+# พล็อต
+plot(r_pct_change,
+     col = col_diff,
+     breaks = breaks,
+     main = "Percent Change in AGB (2017 vs 2024,1HA)",
+     legend.args = list(text = 'Percent Change (%)', side=4, font=2, line=2.5, cex=0.8),
+     axis.args = list(at = pretty(breaks), labels = round(pretty(breaks), 1))
+)
+```
+
+```{r}
+AGBplots_0.25ha_C5$AGBpred_meanTCH_comp <- AGBplots_0.25ha_C5$AGBpred_meanTCH - AGBplots_0.25ha$AGBpred_meanTCH
+
+AGBplots_0.25ha_C5$AGBpred_meanTCH_pct_change <- 
+  100 * (AGBplots_0.25ha_C5$AGBpred_meanTCH - AGBplots_0.25ha$AGBpred_meanTCH) / AGBplots_0.25ha$AGBpred_meanTCH
+
+v <- AGBplots_0.25ha_C5
+r <- raster(extent(v), res = 50)
+r_pct_change <- rasterize(v, r, field = "AGBpred_meanTCH_pct_change")
+
+# สีแดง-ขาว-เขียว (แดง = ลด %, เขียว = เพิ่ม %)
+col_diff <- colorRampPalette(c("red", "white", "darkgreen"))(100)
+
+# หา min max เปอร์เซ็นต์ เพื่อใช้ scale สี
+min_val <- minValue(r_pct_change)
+max_val <- maxValue(r_pct_change)
+
+# ทำ scale สีสมมาตรรอบ 0 (ถ้าต้องการ)
+range_val <- max(abs(min_val), abs(max_val))
+zlim <- c(-range_val, range_val)
+
+# กำหนด breaks ให้สีไล่จาก min ถึง max
+breaks <- seq(zlim[1], zlim[2], length.out = length(col_diff) + 1)
+
+# พล็อต
+plot(r_pct_change,
+     col = col_diff,
+     breaks = breaks,
+     main = "Percent Change in AGB (2017 vs 2024, 0.25 HA)",
+     legend.args = list(text = 'Percent Change (%)', side=4, font=2, line=2.5, cex=0.8),
+     axis.args = list(at = pretty(breaks), labels = round(pretty(breaks), 1))
+)
+```
+
+```{r}
+df_50_Lidar <- bind_rows(
+  AGBplots_0.25ha %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 4),
+  
+  AGBplots_0.25ha_C5 %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 5)
+)
+
+df_100_Lidar <- bind_rows(
+  AGBplots_1ha %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 4),
+  
+  AGBplots_1ha_C5 %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 5)
+)
+```
+
+```{r}
+ggplot(df_50_Lidar, aes(x = AGBpred_meanTCH, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_50_Lidar %>% group_by(Census) %>% summarise(mu = mean(AGBpred_meanTCH, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density of Predicted AGB from LiDar (1 ha)",
+    x = "Predicted AGB (AGBpred_meanTCH)",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+
+ggplot(df_100_Lidar, aes(x = AGBpred_meanTCH, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_100_Lidar %>% group_by(Census) %>% summarise(mu = mean(AGBpred_meanTCH, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density of Predicted AGB from LiDar (0.25 ha)",
+    x = "Predicted AGB (AGBpred_meanTCH)",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+AGBplots_0.25ha_Hpred=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_0.25HA_perHA_Hpred.shp")
+
+AGBplots_1ha_Hpred=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_01HA_perHA_Hpred.dbf")
+
+AGBplots_0.25ha_Hpred_C5=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_0.25HA_perHA_Hpred.dbf")
+
+AGBplots_1ha_Hpred_C5=st_read("C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_01HA_perHA_Hpred.dbf")
+
+```
+
+```{r}
+names(AGBplots_0.25ha_Hpred)[3] <- "AGB_ha"
+names(AGBplots_1ha_Hpred)[3] <- "AGB_ha"
+names(AGBplots_0.25ha_Hpred_C5)[3] <- "AGB_ha"
+names(AGBplots_1ha_Hpred_C5)[3] <- "AGB_ha"
+```
+
+```{r}
+AGBplots_0.25ha_Hpred <- CHM_metrics(AGBplots_0.25ha_Hpred, CHMlidar)
+
+AGBplots_1ha_Hpred <- CHM_metrics(AGBplots_1ha_Hpred, CHMlidar)
+
+AGBplots_0.25ha_Hpred_C5 <- CHM_metrics(AGBplots_0.25ha_Hpred_C5, CHMlidar)
+
+AGBplots_1ha_Hpred_C5 <- CHM_metrics(AGBplots_1ha_Hpred_C5, CHMlidar)
+```
+
+```{r}
+AGBplots_0.25ha_Hpred$AGBpred_H98 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H98)
+AGBplots_0.25ha_Hpred$AGBpred_H90 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H90)
+AGBplots_0.25ha_Hpred$AGBpred_H80 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H80)
+AGBplots_0.25ha_Hpred$AGBpred_H70 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H70)
+AGBplots_0.25ha_Hpred$AGBpred_H60 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H60)
+AGBplots_0.25ha_Hpred$AGBpred_H50 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H50)
+AGBplots_0.25ha_Hpred$AGBpred_H40 <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$H40)
+AGBplots_0.25ha_Hpred$AGBpred_meanTCH <- Predict_AGB(AGBplots_0.25ha_Hpred, AGBplots_0.25ha_Hpred$meanTCH)
+
+```
+
+```{r}
+AGBplots_1ha_Hpred$AGBpred_H98 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H98)
+AGBplots_1ha_Hpred$AGBpred_H90 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha$H90)
+AGBplots_1ha_Hpred$AGBpred_H80 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H80)
+AGBplots_1ha_Hpred$AGBpred_H70 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H70)
+AGBplots_1ha_Hpred$AGBpred_H60 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H60)
+AGBplots_1ha_Hpred$AGBpred_H50 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H50)
+AGBplots_1ha_Hpred$AGBpred_H40 <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha_Hpred$H40)
+AGBplots_1ha_Hpred$AGBpred_meanTCH <- Predict_AGB(AGBplots_1ha_Hpred, AGBplots_1ha$meanTCH)
+```
+
+```{r}
+AGBplots_0.25ha_Hpred_C5$AGBpred_H98 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H98)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H90 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H90)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H80 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H80)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H70 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H70)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H60 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H60)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H50 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H50)
+AGBplots_0.25ha_Hpred_C5$AGBpred_H40 <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$H40)
+AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH <- Predict_AGB(AGBplots_0.25ha_Hpred_C5, AGBplots_0.25ha_Hpred_C5$meanTCH)
+```
+
+```{r}
+AGBplots_1ha_Hpred_C5$AGBpred_H98 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H98)
+AGBplots_1ha_Hpred_C5$AGBpred_H90 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H90)
+AGBplots_1ha_Hpred_C5$AGBpred_H80 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H80)
+AGBplots_1ha_Hpred_C5$AGBpred_H70 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H70)
+AGBplots_1ha_Hpred_C5$AGBpred_H60 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H60)
+AGBplots_1ha_Hpred_C5$AGBpred_H50 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H50)
+AGBplots_1ha_Hpred_C5$AGBpred_H40 <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$H40)
+AGBplots_1ha_Hpred_C5$AGBpred_meanTCH <- Predict_AGB(AGBplots_1ha_Hpred_C5, AGBplots_1ha_Hpred_C5$meanTCH)
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_meanTCH)),
+     main = "Census 4_Hpred : 0.25 ha (mean TCH)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH)),
+     main = "Census 5_Hpred : 0.25 ha (mean TCH)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_meanTCH)),
+     main = "Census 4_Hpred : 1 ha (mean TCH)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_meanTCH,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_meanTCH)),
+     main = "Census 5_Hpred : 1 ha (mean TCH)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H98)),
+     #asp=1, 
+     main = "Census 4_Hpred : 0.25 ha (H98)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H98)),
+     #asp=1, 
+     main = "Census 5_Hpred : 0.25 ha (H98)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+      xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+      ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H98)),
+     #asp=1,
+     main = "Census 4_Hpred : 1 ha (H98)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H98,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+      xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+      ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H98)),
+     #asp=1,
+     main = "Census 5_Hpred : 1 ha (H98)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H90)),
+     main = "Census 4_Hpred : 0.25 ha (H90)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H90)),
+     main = "Census 5_Hpred : 0.25 ha (H90)")
+abline(a=0,b=1)
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H90)),
+     main = "Census 4_Hpred : 1 ha (H90)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H90,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H90)),
+     main = "Census 5_Hpred : 1 ha (H90)")
+abline(a=0,b=1)
+
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3,
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H80)),
+     main = "Census 4_Hpred : 0.25 ha (H80)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3,
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H80)),
+     main = "Census 5_Hpred : 0.25 ha (H80)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H80)),
+     #asp=1,
+     main = "Census 4_Hpred : 1 ha (H80)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H80,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H80)),
+     #asp=1,
+     main = "Census 5_Hpred : 1 ha (H80)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H70)),
+     main = "Census 4_Hpred : 0.25 ha (H70)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H70)),
+     main = "Census 5_Hpred : 0.25 ha (H70)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H70)),
+     main = "Census 4_Hpred : 1 ha (H70)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H70,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H70)),
+     main = "Census_Hpred 5 : 1 ha (H70)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H60)),
+     main = "Census 4_Hpred : 0.25 ha (H60)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H60)),
+     main = "Census 5_Hpred : 0.25 ha (H60)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H60)),
+     main = "Census 4_Hpred : 1 ha (H60)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H60,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H60)),
+     main = "Census 5_Hpred : 1 ha (H60)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H50)),
+     main = "Census 4_Hpred : 0.25 ha (H50)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H50)),
+     main = "Census 5_Hpred : 0.25 ha (H50)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H50)),
+     main = "Census 4_Hpred : 1 ha (H50)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H50,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H50)),
+     main = "Census 5_Hpred : 1 ha (H50)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_0.25ha_Hpred$AGB_ha,AGBplots_0.25ha_Hpred$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred$AGBpred_H40)),
+     main = "Census 4_Hpred : 0.25 ha (H40)")
+abline(a=0,b=1)
+
+plot(AGBplots_0.25ha_Hpred_C5$AGB_ha,AGBplots_0.25ha_Hpred_C5$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_0.25ha_Hpred_C5$AGBpred_H40)),
+     main = "Census 5_Hpred : 0.25 ha (H40)")
+abline(a=0,b=1)
+
+```
+
+```{r}
+plot(AGBplots_1ha_Hpred$AGB_ha,AGBplots_1ha_Hpred$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred$AGBpred_H40)),
+     main = "Census 4_Hpred : 1 ha (H40)")
+abline(a=0,b=1)
+
+plot(AGBplots_1ha_Hpred_C5$AGB_ha,AGBplots_1ha_Hpred_C5$AGBpred_H40,pch=20,xlab="observed AGB", ylab="predicted AGB",
+     cex.lab=1.3, 
+     xlim = c(0,max(AGBplots_1ha_Hpred_C5$AGB_ha)),
+     ylim = c(0,max(AGBplots_1ha_Hpred_C5$AGBpred_H40)),
+     main = "Census 5_Hpred : 1 ha (H40)")
+abline(a=0,b=1)
+
+
+
+```
+
+```{r}
+v <- AGBplots_0.25ha_Hpred
+r <- raster(extent(v), res = 50)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB_Hpred from LiDAR 2017 (0.25 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(100, 600)) 
+```
+
+```{r}
+v <- AGBplots_1ha_Hpred
+r <- raster(extent(v), res = 100)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB_Hpred from LiDAR 2017 (1 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(160, 480)) 
+```
+
+```{r}
+v <- AGBplots_0.25ha_Hpred_C5
+r <- raster(extent(v), res = 50)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB_Hpred from LiDAR 2024 (0.25 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(100, 600)) 
+```
+
+```{r}
+v <- AGBplots_1ha_Hpred_C5
+r <- raster(extent(v), res = 100)
+r_raster <- rasterize(v, r, field = "AGBpred_meanTCH")
+plot(r_raster,
+     main = "AGB_Hpred from LiDAR 2024 (1 HA)",
+     legend.args = list(text = 'Predicted AGB (Mg/ha)', side = 4, font = 2, line = 2.5, cex = 0.8),
+     zlim = c(160, 480)) 
+```
+
+```{r}
+AGBplots_1ha_Hpred_C5$AGBpred_meanTCH_Hpred_comp <- AGBplots_1ha_Hpred_C5$AGBpred_meanTCH - AGBplots_1ha_Hpred$AGBpred_meanTCH
+
+AGBplots_1ha_Hpred_C5$AGBpred_meanTCH_Hpred_pct_change <- 
+  100 * (AGBplots_1ha_Hpred_C5$AGBpred_meanTCH - AGBplots_1ha_Hpred$AGBpred_meanTCH) / AGBplots_1ha_Hpred$AGBpred_meanTCH
+
+v <- AGBplots_1ha_C5
+r <- raster(extent(v), res = 100)
+r_pct_change <- rasterize(v, r, field = "AGBpred_meanTCH_pct_change")
+
+# สีแดง-ขาว-เขียว (แดง = ลด %, เขียว = เพิ่ม %)
+col_diff <- colorRampPalette(c("red", "white", "darkgreen"))(100)
+
+# หา min max เปอร์เซ็นต์ เพื่อใช้ scale สี
+min_val <- minValue(r_pct_change)
+max_val <- maxValue(r_pct_change)
+
+# ทำ scale สีสมมาตรรอบ 0 (ถ้าต้องการ)
+range_val <- max(abs(min_val), abs(max_val))
+zlim <- c(-range_val, range_val)
+
+# กำหนด breaks ให้สีไล่จาก min ถึง max
+breaks <- seq(zlim[1], zlim[2], length.out = length(col_diff) + 1)
+
+# พล็อต
+plot(r_pct_change,
+     col = col_diff,
+     breaks = breaks,
+     main = "Percent Change in AGB (C4_Hpred vs C5_Hpred, 1 HA)",
+     legend.args = list(text = 'Percent Change (%)', side=4, font=2, line=2.5, cex=0.8),
+     axis.args = list(at = pretty(breaks), labels = round(pretty(breaks), 1))
+)
+```
+
+```{r}
+AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH_Hpred_comp <- AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH - AGBplots_0.25ha_Hpred$AGBpred_meanTCH
+
+AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH_Hpred_pct_change <- 
+  100 * (AGBplots_0.25ha_Hpred_C5$AGBpred_meanTCH - AGBplots_0.25ha_Hpred$AGBpred_meanTCH) / AGBplots_0.25ha_Hpred$AGBpred_meanTCH
+
+v <- AGBplots_0.25ha_C5
+r <- raster(extent(v), res = 50)
+r_pct_change <- rasterize(v, r, field = "AGBpred_meanTCH_pct_change")
+
+# สีแดง-ขาว-เขียว (แดง = ลด %, เขียว = เพิ่ม %)
+col_diff <- colorRampPalette(c("red", "white", "darkgreen"))(100)
+
+# หา min max เปอร์เซ็นต์ เพื่อใช้ scale สี
+min_val <- minValue(r_pct_change)
+max_val <- maxValue(r_pct_change)
+
+# ทำ scale สีสมมาตรรอบ 0 (ถ้าต้องการ)
+range_val <- max(abs(min_val), abs(max_val))
+zlim <- c(-range_val, range_val)
+
+# กำหนด breaks ให้สีไล่จาก min ถึง max
+breaks <- seq(zlim[1], zlim[2], length.out = length(col_diff) + 1)
+
+# พล็อต
+plot(r_pct_change,
+     col = col_diff,
+     breaks = breaks,
+     main = "Percent Change in AGB (C4_Hpred vs C5_Hpred, 0.25 HA)",
+     legend.args = list(text = 'Percent Change (%)', side=4, font=2, line=2.5, cex=0.8),
+     axis.args = list(at = pretty(breaks), labels = round(pretty(breaks), 1))
+)
+```
+
+```{r}
+df_50_Hpred_Lidar <- bind_rows(
+  AGBplots_0.25ha_Hpred %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 4),
+  
+  AGBplots_0.25ha_Hpred_C5 %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 5)
+)
+
+df_100_Hpred_Lidar <- bind_rows(
+  AGBplots_1ha_Hpred %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 4),
+  
+  AGBplots_1ha_Hpred_C5 %>%
+    st_drop_geometry() %>% 
+    dplyr::select(AGBpred_meanTCH) %>% 
+    mutate(Census = 5)
+)
+```
+
+```{r}
+ggplot(df_50_Hpred_Lidar, aes(x = AGBpred_meanTCH, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_50_Hpred_Lidar %>% group_by(Census) %>% summarise(mu = mean(AGBpred_meanTCH, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density of Predicted AGB_Hpred from LiDar (1 ha)",
+    x = "Predicted AGB (AGBpred_meanTCH)",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+
+ggplot(df_100_Hpred_Lidar, aes(x = AGBpred_meanTCH, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_100_Hpred_Lidar %>% group_by(Census) %>% summarise(mu = mean(AGBpred_meanTCH, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density of Predicted AGB_Hpred from LiDar (0.25 ha)",
+    x = "Predicted AGB (AGBpred_meanTCH)",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+```

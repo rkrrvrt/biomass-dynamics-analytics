@@ -1,0 +1,1562 @@
+---
+title: "Above Ground Biomass (AGB) Estimation"
+output: html_notebook
+---
+
+This R Notebook calculates Above Ground Biomass (AGB) for tree census data from census 4 and census 5 using the `BIOMASS` R package. It involves taxonomic correction, wood density estimation, height estimation, AGB computation,
+
+## Loading Required Libraries
+
+```{r}
+library(sf)
+library(knitr)
+library(BIOMASS)
+library(ggplot2)
+```
+
+This code block loads the necessary R packages for the analysis:
+
+-   **`sf`**: This package provides functions for handling and manipulating simple features, which is a standardized way to encode spatial vector data (points, lines, polygons). It's crucial for working with geographical coordinates and creating spatial objects.
+
+-   **`knitr`**: This package is used for dynamic report generation in R, allowing R code, output, and text to be combined into various output formats (like HTML, PDF, Markdown). It's generally used to knit the R Notebook itself.
+
+-   **`BIOMASS`**: This is a specialized R package designed for estimating biomass in tropical forests. It provides tools for taxonomic correction, wood density estimation, height modeling, AGB computation, and error propagation, all of which are essential for this analysis.
+
+## Preparing Data for AGB Calculation
+
+```{r}
+data_AGB04 <- census04_clean
+data_AGB05 <- census05_clean
+```
+
+This block creates copies of the cleaned census data for census 4 and census 5, naming them `data_AGB04` and `data_AGB05`. This is a good practice to ensure that the original `census04_clean` and `census05_clean` datasets remain unchanged during the AGB calculation process.
+
+## Taxonomic Correction
+
+```{r}
+Taxo04 <- correctTaxo(
+  genus = data_AGB04$GenusSpeciesCorr,
+  useCache = TRUE, verbose = FALSE)
+saveRDS(Taxo04, file = "C:/Users/rakir/OneDrive/Desktop/Training/DATA/taxo_census04.rsd")
+
+data_AGB04$GenusCorrected <- Taxo04$genusCorrected
+data_AGB04$SpeciesCorrected <- Taxo04$speciesCorrected
+```
+
+This block performs taxonomic correction for the census 4 data using the `correctTaxo` function from the `BIOMASS` package.
+
+-   `correctTaxo(...)`: This function attempts to standardize and correct genus and species names against a recognized taxonomic database (e.g., The Plant List).
+
+    -   `genus = data_AGB04$GenusSpeciesCorr`: Specifies the column containing the genus and species names to be corrected.
+
+    -   `useCache = TRUE`: Tells the function to use a local cache of taxonomic names to speed up the process if previous corrections have been made.
+
+    -   `verbose = FALSE`: Suppresses detailed output messages during the correction process.
+
+-   `saveRDS(Taxo04, ...)`: Saves the `Taxo04` object (which contains the corrected taxonomic information) to an RDS file. This allows for quick loading later without re-running the potentially time-consuming taxonomic correction.
+
+-   `data_AGB04$GenusCorrected` and `data_AGB04$SpeciesCorrected`: The corrected genus and species names are then added as new columns (`GenusCorrected` and `SpeciesCorrected`) to the `data_AGB04` dataframe.
+
+```{r}
+Taxo05 <- correctTaxo(
+  genus = data_AGB05$GenusSpeciesCorr,
+  useCache = TRUE, verbose = FALSE)
+saveRDS(Taxo05, file = "C:/Users/rakir/OneDrive/Desktop/Training/DATA/taxo_census05.rsd")
+
+data_AGB05$GenusCorrected <- Taxo05$genusCorrected
+data_AGB05$SpeciesCorrected <- Taxo05$speciesCorrected
+```
+
+This block performs the identical taxonomic correction process as above, but for the **census 5 data** (`data_AGB05`). The corrected taxonomy is saved as `taxo_census05.rsd` and added to the `data_AGB05` dataframe.
+
+## Retrieving Family and Order Information
+
+```{r}
+APG04 <- getTaxonomy(data_AGB04$GenusCorrected, findOrder = TRUE)
+data_AGB04$familyAPG <- APG04$family
+data_AGB04$orderAPG <- APG04$order
+```
+
+This block retrieves the **APG (Angiosperm Phylogeny Group) family and order** for each tree in the census 4, based on their corrected genus names.
+
+-   `getTaxonomy(..., findOrder = TRUE)`: This function from `BIOMASS` fetches the taxonomic family and order information for the provided genera. `findOrder = TRUE` ensures that the order information is also retrieved.
+
+-   `data_AGB04$familyAPG` and `data_AGB04$orderAPG`: The retrieved family and order information are then appended as new columns to the `data_AGB04` dataframe. This taxonomic information can be useful for further ecological analysis or for assigning wood densities if species-level data is unavailable.
+
+```{r}
+APG05 <- getTaxonomy(data_AGB05$GenusCorrected, findOrder = TRUE)
+data_AGB05$familyAPG <- APG05$family
+data_AGB05$orderAPG <- APG05$order
+```
+
+This block performs the identical process as above to retrieve **APG family and order information for the census 5 data** (`data_AGB05`).
+
+## Estimating Wood Density
+
+```{r}
+wood_densities04 <- getWoodDensity(
+  genus = data_AGB04$GenusCorrected,
+  species = data_AGB04$SpeciesCorrected,
+  stand = data_AGB04$Plot 
+)
+```
+
+This block estimates the **wood density (WD)** for each tree in the census 4 using the `getWoodDensity` function from `BIOMASS`.
+
+-   `getWoodDensity(...)`: This function assigns wood density values based on available species or genus-level data from a global wood density database (e.g., Global Wood Density Database).
+
+    -   `genus = data_AGB04$GenusCorrected` and `species = data_AGB04$SpeciesCorrected`: Provide the corrected taxonomic information.
+
+    -   `stand = data_AGB04$Plot`: Incorporates plot-level information, which can be useful if regional wood density averages are used or if there's a need to track density sources by plot.
+
+-   The `wood_densities04` object will contain the estimated mean wood density (`meanWD`) for each tree, along with the confidence level of the estimation (e.g., "species", "genus", "family", or global mean).
+
+```{r}
+wood_densities05 <- getWoodDensity(
+  genus = data_AGB05$GenusCorrected,
+  species = data_AGB05$SpeciesCorrected,
+  stand = data_AGB05$Plot 
+)
+```
+
+This block performs the identical wood density estimation process for the **census 5 data** (`data_AGB05`).
+
+```{r}
+data_AGB04$WD <- wood_densities04$meanWD
+data_AGB05$WD <- wood_densities05$meanWD
+```
+
+This block extracts the calculated **mean wood density (`meanWD`)** from the `wood_densities04` and `wood_densities05` objects and assigns them to a new `WD` column in the respective `data_AGB04` and `data_AGB05` dataframes. This makes the wood density values directly accessible within the main dataframes for AGB calculation.
+
+```{r}
+sum(wood_densities04$levelWD == "species")
+sum(wood_densities04$levelWD == "genus")
+sum(!wood_densities04$levelWD %in% c("genus", "species"))
+```
+
+This block quantifies the **confidence level of the wood density assignments** for the census 4 data.
+
+-   `sum(wood_densities04$levelWD == "species")`: Counts how many trees had their wood density assigned at the species level (most accurate).
+
+-   `sum(wood_densities04$levelWD == "genus")`: Counts how many trees had their wood density assigned at the genus level (when species-level data was unavailable).
+
+-   `sum(!wood_densities04$levelWD %in% c("genus", "species"))`: Counts how many trees had their wood density assigned using broader taxonomic levels (e.g., family) or a global mean (least specific). This provides insight into the reliability of the wood density estimates.
+
+```{r}
+sum(wood_densities05$levelWD == "species")
+sum(wood_densities05$levelWD == "genus")
+sum(!wood_densities05$levelWD %in% c("genus", "species"))
+```
+
+This block performs the identical confidence level quantification for wood density assignments for the **census 5 data**.
+
+## Checking Missing Values After Wood Density Assignment
+
+```{r}
+colSums(is.na(data_AGB04))
+```
+
+```{r}
+colSums(is.na(data_AGB05))
+```
+
+This command calculates the sum of `NA` (missing) values for each column in the `data_AGB04` and `data_AGB05` dataframe after adding the wood density information. This is an important check to ensure that no new missing values were introduced or if any species/genus could not be assigned a wood density.
+
+```{r}
+data_conner_filtered <- data_conner %>%
+  filter(Plot == unique(data_AGB04$Plot) & X_loc == 0 & Y_loc == 0)
+
+head(data_conner_filtered)
+```
+
+This block filters the `data_conner` (plot corner information) to select a specific plot's GPS coordinates, which are needed for height modeling.
+
+-   `filter(Plot == unique(data_AGB04$Plot) & X_loc == 0 & Y_loc == 0)`: This assumes that `data_AGB04` (and `data_AGB05`) contains data for a single plot (`"MST"` based on later code) and that the plot's GPS coordinates are recorded at a specific corner (e.g., `X_loc = 0, Y_loc = 0`). It extracts the corresponding UTM coordinates (`X_UTM`, `Y_UTM`) for this plot.
+
+-   `head(data_conner_filtered)`: Displays the first few rows of the filtered plot corner data.
+
+```{r}
+tree_data04 <-data_AGB04 %>%
+  left_join(data_conner_filtered, by = "Plot") %>%
+  mutate(
+    abs_x = X_UTM + PX,
+    abs_y = Y_UTM + PY  
+  ) %>%
+  dplyr::select(abs_x, abs_y)  
+
+tree_data05 <-data_AGB05 %>%
+  left_join(data_conner_filtered, by = "Plot") %>%
+  mutate(
+    abs_x = X_UTM + PX, 
+    abs_y = Y_UTM + PY
+  ) %>%
+  dplyr::select(abs_x, abs_y) 
+
+```
+
+This block calculates the **absolute UTM coordinates** for each tree by combining the plot's GPS coordinates with the tree's relative coordinates within the plot.
+
+-   `left_join(data_conner_filtered, by = "Plot")`: Joins the `data_AGB04` (or `data_AGB05`) with the filtered `data_conner_filtered` based on the `Plot` ID. This adds the plot's `X_UTM` and `Y_UTM` coordinates to each tree record.
+
+-   `mutate(abs_x = X_UTM + PX, abs_y = Y_UTM + PY)`: Calculates the absolute UTM coordinates (`abs_x`, `abs_y`) for each tree. It assumes `PX` and `PY` are the tree's relative coordinates from the plot origin within the plot.
+
+-   `dplyr::select(abs_x, abs_y)`: Selects only the calculated absolute coordinates, creating dataframes ready for spatial operations.
+
+```{r}
+head(tree_data04)
+head(tree_data05)
+```
+
+Displays the first few rows of the `tree_data04` and `tree_data05` dataframes, showing the calculated absolute UTM coordinates for trees.
+
+```{r}
+tree_sf04 <- st_as_sf(tree_data04, coords = c("abs_x", "abs_y"), crs = 32647)
+tree_sf05 <- st_as_sf(tree_data05, coords = c("abs_x", "abs_y"), crs = 32647)
+```
+
+This block converts the tree coordinate data into **spatial simple features (`sf`) objects**.
+
+-   `st_as_sf(...)`: This function converts a regular data frame into an `sf` object.
+
+    -   `coords = c("abs_x", "abs_y")`: Specifies the columns that contain the x and y coordinates.
+
+    -   `crs = 32647`: Assigns the Coordinate Reference System (CRS) to the data. `EPSG:32647` corresponds to **WGS 84 / UTM zone 47N**, which is a projected coordinate system commonly used in Thailand. This is crucial for accurate spatial operations and projections.
+
+```{r}
+tree_longlat04 <- st_transform(tree_sf04, crs = 4326)
+tree_longlat05 <- st_transform(tree_sf05, crs = 4326)
+```
+
+This block **transforms the projected UTM coordinates into geographic latitude and longitude coordinates**.
+
+-   `st_transform(..., crs = 4326)`: This function reprojects the `sf` object from its current CRS (`32647` - UTM) to a new CRS. `EPSG:4326` corresponds to **WGS 84 latitude/longitude**, which is a global geographic coordinate system commonly used for web maps and spatial analysis requiring latitude/longitude. This step is necessary because the `retrieveH` function (used for height estimation) requires coordinates in latitude and longitude.
+
+```{r}
+coords_longlat04 <- st_coordinates(tree_longlat04)
+tree_data04$lon <- coords_longlat04[, 1]
+tree_data04$lat <- coords_longlat04[, 2]
+
+coords_longlat05 <- st_coordinates(tree_longlat05)
+tree_data05$lon <- coords_longlat05[, 1]
+tree_data05$lat <- coords_longlat05[, 2]
+```
+
+This block extracts the latitude and longitude coordinates from the transformed `sf` objects and adds them back as numerical columns to the `tree_data04` and `tree_data05` dataframes.
+
+-   `st_coordinates(tree_longlat04)`: Extracts the coordinate matrix from the `sf` object. The first column is longitude, and the second is latitude.
+
+-   `tree_data04$lon` and `tree_data04$lat`: Assigns these extracted longitude and latitude values to new `lon` and `lat` columns in the original (non-sf) `tree_data04` dataframe. This makes these geographic coordinates easily accessible for other functions.
+
+```{r}
+head(tree_data04)
+head(tree_data05)
+```
+
+Displays the first few rows of `tree_data04` and `tree_data05` again, now showing the added longitude and latitude columns.
+
+```{r}
+coords04 <- apply(tree_data04[c("lon", "lat")], 2, mean)
+coords05 <- apply(tree_data05[c("lon", "lat")], 2, mean)
+```
+
+This block calculates the **mean longitude and latitude** for all trees in each census year.
+
+-   `apply(..., 2, mean)`: Applies the `mean` function to the columns (dimension 2) of the `lon` and `lat` columns from `tree_data04` (and `tree_data05`). This gives the average geographic coordinates of the plot or group of trees, which is typically used as a single coordinate point for the entire stand when estimating height.
+
+## Estimating Tree Height (H)
+
+```{r}
+H_chave04 <- retrieveH(
+  D = data_AGB04$DiamManCorr,
+  coord = coords04
+)
+
+H_chave05 <- retrieveH(
+  D = data_AGB05 $DiamManCorr,
+  coord = coords05
+)
+```
+
+This block estimates tree height (`H`) for each tree using a global allometric model, specifically one of the **Chave et al. (2014) height models**, which are part of the `BIOMASS` package.
+
+-   `retrieveH(...)`: This function estimates individual tree heights based on diameter (`D`) and location (`coord`). It uses global diameter-height relationships.
+
+    -   `D = data_AGB04$DiamManCorr`: Provides the tree diameter at breast height (DBH) for the estimation.
+
+    -   `coord = coords04`: Provides the mean longitude and latitude of the plot, which helps in selecting the appropriate global height-diameter model based on climatic zones.
+
+-   `H_chave04` and `H_chave05` will contain the estimated height for each tree.
+
+```{r}
+data_AGB04$H_chave <- H_chave04$H
+data_AGB05$H_chave <- H_chave05$H
+```
+
+This block extracts the estimated heights (`H`) from the `H_chave04` and `H_chave05` objects and adds them as a new `H_chave` column to the respective `data_AGB04` and `data_AGB05` dataframes.
+
+```{r}
+
+HDmodel04 <- modelHD(
+  D = data_AGB04$DiamManCorr,
+  H = data_AGB04$H_chave,
+  method = "log2",
+  useWeight = TRUE
+)
+
+HDmodel05 <- modelHD(
+  D = data_AGB05$DiamManCorr,
+  H = data_AGB05$H_chave,
+  method = "log2",
+  useWeight = TRUE
+)
+```
+
+This block fits a **Height-Diameter (H-D) model** for the local data in each census year. This model can then be used to predict heights for trees where direct height measurements might be missing or to propagate errors from the H-D relationship.
+
+-   `modelHD(...)`: This function from `BIOMASS` fits a relationship between `D` and `H`.
+
+    -   `D = data_AGB04$DiamManCorr` and `H = data_AGB04$H_chave`: Provide the diameter and the estimated heights (from `retrieveH`) to fit the model.
+
+    -   `method = "log2"`: Specifies the method for fitting the H-D curve, often a double-logarithmic model.
+
+    -   `useWeight = TRUE`: Indicates that weighted least squares should be used for fitting, which can account for heteroscedasticity common in H-D relationships.
+
+-   `HDmodel04` and `HDmodel05` store the parameters of the fitted H-D models for each census.
+
+## Computing Above Ground Biomass (AGB)
+
+```{r}
+data_AGB04$AGB <- computeAGB(
+  D = data_AGB04$DiamManCorr,
+  WD = data_AGB04$WD,
+  H = data_AGB04$H_chave 
+)
+
+data_AGB05$AGB <- computeAGB(
+  D = data_AGB05$DiamManCorr,
+  WD = data_AGB05$WD,
+  H = data_AGB05$H_chave 
+)
+```
+
+This block calculates the **Above Ground Biomass (AGB)** for each individual tree using the Chave et al. (2014) pantropical allometric equation, which is implemented in `BIOMASS`.
+
+-   `computeAGB(...)`: This function estimates AGB based on diameter, wood density, and height.
+
+    -   `D = data_AGB04$DiamManCorr`: Tree diameter at breast height.
+
+    -   `WD = data_AGB04$WD`: Estimated wood density.
+
+    -   `H = data_AGB04$H_chave`: Estimated tree height.
+
+-   A new column `AGB` (typically in kilograms, Mg) is added to `data_AGB04` and `data_AGB05`, storing the calculated AGB for each tree.
+
+## Propagating Errors in AGB Estimation (Monte Carlo)
+
+These blocks perform **Monte Carlo simulations** to propagate uncertainties from different sources (DBH measurement, wood density, and height model) into the total AGB estimate. This provides a more robust estimate of uncertainty than simply calculating standard errors.
+
+```{r}
+D_error_prop04 <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, H = data_AGB04$H_chave,
+  Dpropag = "chave2004",
+  errWD = rep(0,nrow(data_AGB04)), errH = 0 
+)
+
+D_error_prop05 <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, H = data_AGB05$H_chave,
+  Dpropag = "chave2004",
+  errWD = rep(0,nrow(data_AGB05)), errH = 0 
+)
+```
+
+This block calculates the **error propagated from DBH measurement uncertainty** only.
+
+-   `AGBmonteCarlo(...)`: This function performs Monte Carlo simulations.
+
+    -   `Dpropag = "chave2004"`: Specifies the method for propagating error from DBH measurement, often referring to a specific error model (e.g., from Chave et al. 2004).
+
+    -   `errWD = rep(0,nrow(...))`: Sets the error for wood density to zero, meaning no error is propagated from this source in this specific simulation.
+
+    -   `errH = 0`: Sets the error for height to zero.
+
+-   `D_error_prop04` and `D_error_prop05` store the simulation results, specifically the standard deviation of AGB resulting solely from DBH measurement error.
+
+```{r}
+WD_error_prop04 <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, H = data_AGB04$H_chave,
+  errWD = wood_densities04$sdWD,
+  Dpropag = 0 , errH = 0 
+)
+
+WD_error_prop05 <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, H = data_AGB05$H_chave,
+  errWD = wood_densities05$sdWD,
+  Dpropag = 0 , errH = 0 
+)
+```
+
+This block calculates the **error propagated from wood density uncertainty** only.
+
+-   `errWD = wood_densities04$sdWD`: Uses the standard deviation of wood density estimates (obtained from `getWoodDensity`) as the error source.
+
+-   `Dpropag = 0` and `errH = 0`: Sets errors from DBH and height to zero.
+
+-   `WD_error_prop04` and `WD_error_prop05` store the simulation results for wood density error propagation.
+
+```{r}
+H_model_error_prop04 <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, 
+  HDmodel = HDmodel04, 
+  Dpropag = 0 , errWD = rep(0,nrow(data_AGB04)) 
+)
+
+H_model_error_prop05 <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, 
+  HDmodel = HDmodel05, 
+  Dpropag = 0 , errWD = rep(0,nrow(data_AGB05)) 
+)
+```
+
+This block calculates the **error propagated from the Height-Diameter (H-D) model uncertainty**.
+
+-   `HDmodel = HDmodel04`: Instead of providing individual tree heights `H`, the fitted `HDmodel` is provided, allowing the function to simulate height based on the model's uncertainty.
+
+-   `Dpropag = 0` and `errWD = rep(0,nrow(...))`: Sets errors from DBH and wood density to zero.
+
+-   `H_model_error_prop04` and `H_model_error_prop05` store the simulation results for H-D model error propagation.
+
+```{r}
+error_prop04 <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr,
+  WD =  data_AGB04$WD,        
+  H =  data_AGB04$H_chave, 
+  Dpropag = "chave2004",           
+  errWD = wood_densities04$sdWD,    
+  errH = H_model_error_prop04$sdAGB
+)
+
+error_prop05 <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr,         
+  WD =  data_AGB05$WD,        
+  H =  data_AGB05$H_chave, 
+  Dpropag = "chave2004",           
+  errWD = wood_densities05$sdWD,    
+  errH = H_model_error_prop05$sdAGB
+)
+```
+
+This block performs the **full AGB Monte Carlo simulation**, combining uncertainties from all three sources: DBH measurement, wood density, and height estimation (from the H-D model).
+
+-   `Dpropag = "chave2004"`: Incorporates DBH measurement error.
+
+-   `errWD = wood_densities04$sdWD`: Incorporates wood density uncertainty.
+
+-   `errH = H_model_error_prop04$sdAGB`: Incorporates the standard deviation of AGB caused by height model uncertainty (obtained from the previous `H_model_error_prop` simulation).
+
+-   `error_prop04` and `error_prop05` will contain the simulated AGB values and the overall standard deviation of AGB, representing the combined uncertainty.
+
+## Summarizing and Displaying AGB Results
+
+```{r}
+error_prop04[(1:4)]
+sum(data_AGB04$AGB)
+```
+
+```{r}
+error_prop05[(1:4)]
+sum(data_AGB05$AGB)
+```
+
+This block displays a quick summary of the Monte Carlo simulation results for census 4, census 5 and the total AGB for both years.
+
+-   `error_prop04[(1:4)]`: Shows the first four elements of the `error_prop04` object, which typically include the mean AGB, standard deviation, and confidence intervals from the simulation.
+
+-   `sum(data_AGB04$AGB)` and `sum(data_AGB05$AGB)`: Calculates and displays the total AGB (sum of individual tree AGBs) for the entire plot, based on the initial `computeAGB` calculation (without Monte Carlo uncertainty).
+
+```{r}
+AGB_by_plot04 <- summaryByPlot(AGB_val = error_prop04$AGB_simu, plot = data_AGB04$Plot, drawPlot = TRUE)
+AGB_by_plot05 <- summaryByPlot(AGB_val = error_prop05$AGB_simu, plot = data_AGB05$Plot, drawPlot = TRUE)
+```
+
+This block summarizes the AGB estimates at the plot level using the Monte Carlo simulation results and also provides simple summaries of the initially calculated AGB.
+
+-   `summaryByPlot(...)`: This function from `BIOMASS` aggregates the AGB values by plot and provides statistical summaries, including confidence intervals from the Monte Carlo simulations. `AGB_val = error_prop04$AGB_simu` provides the simulated AGB values. `drawPlot = TRUE` indicates that a plot-level summary plot should be generated (though not explicitly shown in the Rmd output).
+
+```{r}
+AGB_by_plot04$Census <- "4"
+AGB_by_plot05$Census <- "5"
+
+AGB_combined <- bind_rows(AGB_by_plot04, AGB_by_plot05)
+
+ggplot(AGB_combined, aes(x = Census, y = AGB, color = Census)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = Cred_2.5, ymax = Cred_97.5), width = 0.2) +
+  labs(
+    title = "AGB Comparison for Plot MST",
+    x = "Census",
+    y = "AGB (Mg)"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_manual(values = c("5" = "#E75480", "4" = "#2ECC71"))
+```
+
+This block prepares and visualizes the total plot-level AGB with its confidence intervals for both census years.
+
+-   `AGB_by_plot04$Census <- "4"` and `AGB_by_plot05$Census <- "5"`: Adds a `Census` year column to each plot summary table.
+
+-   `AGB_combined <- bind_rows(AGB_by_plot04, AGB_by_plot05)`: Combines the two plot summary tables into a single dataframe for easy plotting.
+
+-   `ggplot(...)`: Generates a point plot with error bars to compare AGB.
+
+    -   `aes(x = Census, y = AGB, color = Census)`: `Census` year on the x-axis, mean AGB on the y-axis, and color by `Census` year.
+
+    -   `geom_point(size = 4)`: Plots the mean AGB value as a large point.
+
+    -   `geom_errorbar(aes(ymin = Cred_2.5, ymax = Cred_97.5), width = 0.2)`: Adds vertical error bars representing the 95% credible interval (from the Monte Carlo simulations, typically the 2.5th and 97.5th percentiles).
+
+    -   `labs(...)`: Sets plot title and axis labels.
+
+    -   `scale_color_manual(...)`: Assigns specific colors for Census 4 and Census 5 points/error bars.
+
+    -   `theme_minimal(...)`: Applies a minimal theme.
+
+## Plot Spatial Configuration and Subplot Division
+
+```{r}
+MST_plot_corner <- data_conner[data_conner$Plot == "MST",]
+```
+
+This line filters the `data_conner` dataframe to select only the corner coordinates specifically for the plot named "MST". This `MST_plot_corner` will be used to define the spatial extent of the plot for further analysis.
+
+```{r}
+fieldplot <- check_plot_coord(
+  corner_data =  MST_plot_corner,
+  proj_coord = c("X_UTM", "Y_UTM"),  
+  rel_coord = c("X_loc", "Y_loc"),
+  plot_ID = "Plot",
+  trust_GPS_corners = FALSE,
+  draw_plot = TRUE, rm_outliers = FALSE)
+```
+
+This block uses the `check_plot_coord` function from `BIOMASS` to analyze and visualize the spatial configuration of the "MST" plot based on its corner coordinates.
+
+```{r}
+fieldplot04 <- check_plot_coord(
+  corner_data =  MST_plot_corner,
+  proj_coord = c("X_UTM", "Y_UTM"),  
+  rel_coord = c("X_loc", "Y_loc"),
+  plot_ID = "Plot",                      
+  trust_GPS_corners = FALSE,
+  tree_data = data_AGB04,
+  tree_coords = c("PX", "PY"),
+  tree_plot_ID = "Plot",           
+  draw_plot = TRUE, 
+  rm_outliers = FALSE
+)
+```
+
+```{r}
+fieldplot05 <- check_plot_coord(
+  corner_data =  MST_plot_corner,
+  proj_coord = c("X_UTM", "Y_UTM"),  
+  rel_coord = c("X_loc", "Y_loc"),
+  plot_ID = "Plot",                      
+  trust_GPS_corners = FALSE,
+  tree_data = data_AGB05,
+  tree_coords = c("PX", "PY"),
+  tree_plot_ID = "Plot",           
+  draw_plot = TRUE, 
+  rm_outliers = FALSE
+)
+```
+
+This similar to the previous `check_plot_coord` call but now includes `tree_data = data_AGB04 (or data_AGB05)` and `tree_coords = c("PX", "PY")` to visualize the spatial distribution of individual trees within the defined plot boundaries for Census 4 and 5. This helps verify that tree locations are correctly mapped within the plot.
+
+```{r}
+st_write(
+  obj = fieldplot04$polygon,
+  dsn = "C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/MST_fieldplot04.shp",
+  delete_layer = TRUE
+)
+
+st_write(
+  obj = fieldplot05$polygon,
+  dsn = "C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/MST_fieldplot05.shp",
+  delete_layer = TRUE
+)
+```
+
+This block exports the defined polygon of the "MST" field plot as a **ESRI Shapefile** (`.shp`), a common geospatial vector data format.
+
+```{r}
+subplots04_grid50 <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 50,
+  tree_data = data_AGB04, 
+  tree_coords = c("PX","PY")
+)
+
+subplots04_grid100 <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 100,
+  tree_data = data_AGB04, 
+  tree_coords = c("PX","PY")
+)
+```
+
+```{r}
+subplots05_grid50 <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 50,
+  tree_data = data_AGB05, 
+  tree_coords = c("PX","PY")
+)
+
+subplots05_grid100 <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 100,
+  tree_data = data_AGB05, 
+  tree_coords = c("PX","PY")
+)
+```
+
+This block divides the main plot (MST) into smaller, regular **subplots** (grids) and assigns trees to these subplots for the census 4 and 5.
+
+-   `divide_plot(...)`: This function from `BIOMASS` partitions a larger plot into a grid of subplots. `corner_data = fiel`
+
+    -   `dplot$corner_coord`: Provides the corrected corner coordinates of the main plot.
+    -   `rel_coord` and `proj_coord`: Specify the relative and projected coordinate columns for the corners.
+    -   `grid_size = 50`: Divides the plot into subplots of **50x50 meters** (0.25 ha).
+    -   `grid_size = 100`: Divides the plot into subplots of **100x100 meters** (1 ha).
+    -   `tree_data = data_AGB04` and `tree_coords = c("PX","PY")`: Assigns each tree from `data_AGB04` to its corresponding subplot based on its relative coordinates.
+
+-   `subplots04_grid50`, `subplots04_grid100`, `subplots05_grid50` and `subplots05_grid100`, will contain the tree data augmented with `subplot_ID` and the spatial geometries of these subplots.
+
+```{r}
+subplot_metric04_perHA50 <- subplot_summary(
+  subplots = subplots04_grid50,
+  value = "AGB",
+  per_ha = TRUE)
+```
+
+This block calculates the **total AGB per hectare** for each 50x50m subplot in the 2004 census.
+
+-   `subplot_summary(...)`: This function aggregates a specified value within each subplot.
+
+```         
+-   `subplots = subplots04_grid50`: Provides the divided subplots data.
+
+-   `value = "AGB"`: Specifies that the `AGB` column (calculated previously) should be summarized.
+
+-   `per_ha = TRUE`: Instructs the function to convert the total AGB within each subplot to **Mg per hectare (Mg/ha)**, which is a standardized unit for biomass density.
+```
+
+-   `subplot_metric04_perHA50` will contain the summarized AGB values for each subplot, along with their spatial geometries.
+
+```{r}
+subplot_polygons0.25_perHA <- sf::st_set_crs(
+ subplot_metric04_perHA50$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons0.25_perHA,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_0.25HA_perHA.shp")
+```
+
+```{r}
+subplot_metric04_sum50<- subplot_summary(
+  subplots = subplots04_grid50,
+  value = "AGB",
+  fun = quantile, probs = 0.5, # yes, it is the median
+  per_ha = FALSE)
+```
+
+This block calculates the **median AGB per subplot** (not per hectare) for the 50x50m grid in census 4 and exports these subplot polygons as a shapefile.
+
+-   `subplot_summary(..., fun = quantile, probs = 0.5, per_ha = FALSE)`: Calculates the median AGB for each subplot (`fun = quantile, probs = 0.5`) and `per_ha = FALSE` means it provides the total AGB within the subplot area, not scaled to per hectare.
+
+```{r}
+subplot_metric04_perHA100 <- subplot_summary(
+  subplots = subplots04_grid100,
+  value = "AGB", 
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons01_perHA <- sf::st_set_crs(
+ subplot_metric04_perHA100$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons01_perHA,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_01HA_perHA.shp")
+```
+
+This block calculates the **total AGB per hectare** for each 100x100m subplot in the census 4, similar to `subplot_metric04_perHA50` but for the larger grid size.
+
+```{r}
+subplot_metric04_sum100 <- subplot_summary(
+  subplots = subplots04_grid100,
+  value = "AGB",
+  fun = quantile, probs = 0.5,
+  per_ha = FALSE)
+```
+
+```{r}
+subplot_polygons01 <- sf::st_set_crs(
+  subplot_metric04_sum100$polygon ,
+  value = "EPSG:32647")
+```
+
+This block calculates the **median AGB per subplot** (not per hectare) for the 100x100m grid in census 4 and exports these subplot polygons as a shapefile, similar to the 50x50m version.
+
+```{r}
+subplot_metric05_perHA50  <- subplot_summary(
+  subplots = subplots05_grid50,
+  value = "AGB", 
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons0.25_perHA2 <- sf::st_set_crs(
+ subplot_metric05_perHA50$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons0.25_perHA,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_0.25HA_perHA.shp")
+```
+
+```{r}
+subplot_metric05_sum50 <- subplot_summary(
+  subplots = subplots05_grid50,
+  value = "AGB",
+  fun = quantile, probs = 0.5, # yes, it is the median
+  per_ha = FALSE)
+```
+
+```{r}
+subplot_metric05_perHA100 <- subplot_summary(
+  subplots = subplots05_grid100,
+  value = "AGB", 
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons01_perHA2 <- sf::st_set_crs(
+ subplot_metric05_perHA100$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons01_perHA2,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_01HA_perHA.shp")
+```
+
+```{r}
+subplot_metric05_sum100 <- subplot_summary(
+  subplots = subplots05_grid100,
+  value = "AGB",
+  fun = quantile, probs = 0.5, # yes, it is the median
+  per_ha = FALSE)
+```
+
+```{r}
+poly04 <- subplot_metric04_sum50$polygon
+poly05 <- subplot_metric05_sum50$polygon
+```
+
+## Visualizing AGB Change per Subplot (0.25 HA)
+
+```{r}
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(AGB_change = AGB_summary_per_ha_05 - AGB_summary_per_ha_04)
+
+agb_map <- left_join(poly04, agb_change, by = "subplot_ID")
+
+agb_map <- poly04 %>%
+  st_drop_geometry() %>%
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>% dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()                           
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change), color = "black") +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "AGB Change\n(Mg/ha)"
+  ) +
+  labs(title = "Change in AGB between Census 04 and Census 05 (0.25 HA)") +
+  theme_minimal()
+
+```
+
+This complex block calculates the **change in AGB per hectare for each 50x50m subplot** between census 4 and 5 and then visualizes this change on a spatial map.
+
+-   `st_drop_geometry(poly04)` and `st_drop_geometry(poly05)`: Removes the spatial geometry from the subplot `sf` objects, converting them into regular data frames. This is necessary for performing standard data frame joins.
+
+-   `agb_change <- ... inner_join(...) %>% mutate(AGB_change = ...)`: Performs an `inner_join` on the two dataframes by `subplot_ID` to match corresponding subplots across years. It then calculates `AGB_change` by subtracting AGB from census 4 from AGB in census 5.
+
+-   The subsequent lines (starting `agb_map <- poly04 %>% ...`) re-attach the calculated `AGB_change` values back to the original `sf` polygon object of `poly04`. It ensures that the spatial information is re-associated with the AGB change data.
+
+-   `ggplot(agb_map) + geom_sf(aes(fill = AGB_change), color = "black")`: Creates a spatial plot. `geom_sf` is specifically for plotting simple feature objects. The fill color is mapped to `AGB_change`.
+
+-   `scale_fill_gradient2(...)`: Sets a diverging color gradient for the fill. `low = "red"` indicates a decrease, `mid = "white"` indicates no change, and `high = "darkgreen"` indicates an increase. `midpoint = 0` centers the color scale around zero.
+
+-   `labs(...)` and `theme_minimal()`: Sets the plot title, legend title, and theme. This map visually highlights areas of AGB gain or loss within the plot.
+
+ยังไม่ได้เขียนอธิบายกราฟล่าง
+
+```{r}
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(
+
+    AGB_change_relative = ifelse(
+      AGB_summary_per_ha_04 > 0,
+      (AGB_summary_per_ha_05 - AGB_summary_per_ha_04) / AGB_summary_per_ha_04,
+      0
+    )
+  )
+
+agb_map <- poly04 %>%
+ st_drop_geometry() %>%
+ inner_join(agb_change, by = "subplot_ID") %>%
+ left_join(poly04 %>% dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+ st_as_sf()
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change_relative), color = "black") +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "Relative AGB Change\n(%)",
+    labels = scales::percent 
+  ) +
+  labs(title = "Relative Change in AGB between Census 04 and Census 05 (0.25 HA)") +
+  theme_minimal()
+```
+
+## Visualizing AGB Change per Subplot (1 HA)
+
+```{r}
+poly04 <- subplot_metric04_sum100$polygon
+poly05 <- subplot_metric05_sum100$polygon
+```
+
+```{r}
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(AGB_change = AGB_summary_per_ha_05 - AGB_summary_per_ha_04)
+
+agb_map <- left_join(poly04, agb_change, by = "subplot_ID")
+
+agb_map <- poly04 %>%
+  st_drop_geometry() %>%            
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>% dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()                          
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change), color = "black") +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "AGB Change\n(Mg/ha)"
+  ) +
+  labs(title = "Change in AGB between Census 04 and Census 05 (Grid = 100)") +
+  theme_minimal()
+```
+
+This block performs the identical calculation and visualization of **AGB change per hectare**, but for the **100x100m subplots**. This allows for a coarser spatial resolution of AGB changes within the plot.
+
+ยังไม่ได้เขียนอธิบายกราฟล่าง
+
+```{r}
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(
+    AGB_change_relative = ifelse(
+      AGB_summary_per_ha_04 > 0,
+      (AGB_summary_per_ha_05 - AGB_summary_per_ha_04) / AGB_summary_per_ha_04,
+      0
+    )
+  )
+
+agb_map <- poly04 %>%
+  st_drop_geometry() %>%
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>% dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change_relative), color = "black") +
+  
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "Relative AGB Change\n(%)",
+    labels = scales::percent 
+    
+  ) +
+  
+  labs(title = "Relative Change in AGB between Census 04 and Census 05 (1 HA)") +
+  theme_minimal()
+```
+
+```{r}
+sf_subplots04_50 <- subplot_metric04_perHA50$polygon
+sf_subplots04_100 <- subplot_metric04_perHA100$polygon
+
+sf_subplots05_50 <- subplot_metric05_perHA50$polygon
+sf_subplots05_100 <- subplot_metric05_perHA100$polygon
+```
+
+```{r}
+df_100 <- bind_rows(
+  sf_subplots04_100 %>% st_drop_geometry() %>%
+    mutate(Census = 4),
+  sf_subplots05_100 %>% st_drop_geometry() %>%
+    mutate(Census = 5)
+)
+
+ggplot(df_100, aes(x = AGB_summary_per_ha, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_100 %>% group_by(Census) %>%
+               summarise(mu = mean(AGB_summary_per_ha, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density Plot of AGB per HA by Census (1 HA)",
+    x = "AGB per ha",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+df_50 <- bind_rows(
+  sf_subplots04_50 %>% st_drop_geometry() %>%
+    mutate(Census = 4),
+  sf_subplots05_50 %>% st_drop_geometry() %>%
+    mutate(Census = 5)
+)
+
+ggplot(df_50, aes(x = AGB_summary_per_ha, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_50 %>% group_by(Census) %>%
+               summarise(mu = mean(AGB_summary_per_ha, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density Plot of AGB per HA by Census (0.25 HA)",
+    x = "AGB per ha",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+```
+
+## Custom Height Prediction Function
+
+```{r}
+Calculate_Hpred <- function(Plot, DiamManCorr) {
+  if (Plot == "MST") {
+    return(exp(0.221 + 0.5 * 0.324^2 + 1.115 * log(DiamManCorr) - 0.075 * log(DiamManCorr)^2))
+  }
+}
+```
+
+This code defines a custom R function named `Calculate_Hpred` to predict tree height based on diameter (`DiamManCorr`) for a specific plot ("MST").
+
+```{r}
+data_AGB04$Hpred <- mapply(Calculate_Hpred, data_AGB04$Plot,data_AGB04$DiamManCorr)
+data_AGB05$Hpred <- mapply(Calculate_Hpred, data_AGB05$Plot,data_AGB05$DiamManCorr)
+summary(data_AGB04$Hpred)
+summary(data_AGB05$Hpred)
+```
+
+This block applies the custom `Calculate_Hpred` function to predict height for each tree in both census datasets.
+
+-   `mapply(Calculate_Hpred, data_AGB04$Plot, data_AGB04$DiamManCorr)`: The `mapply` function is used to apply `Calculate_Hpred` row-wise, passing the `Plot` and `DiamManCorr` values for each tree.
+
+-   New columns named `Hpred` are added to `data_AGB04` and `data_AGB05` to store these predicted heights.
+
+`summary()`: Displays a statistical summary of the predicted heights for both years, providing insights into their range and distribution.
+
+## Comparing Custom Predicted Height (Hpred) with Chave-estimated Height (H_chave)
+
+```{r}
+
+ggplot(data_AGB04, aes(x = H_chave, y = Hpred)) +
+  geom_point(alpha = 0.5, color = "#26C4B8") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(
+    title = "Comparison of Hpred vs H_chave (Census 4)",
+    x = "H_chave (m)",
+    y = "Hpred (m)"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+This code generates a scatter plot to visually compare the custom predicted heights (`Hpred`) with the heights estimated using the Chave model (`H_chave`) for Census 4.
+
+```{r}
+ggplot(data_AGB05, aes(x = H_chave, y = Hpred)) +
+  geom_point(alpha = 0.5, color = "#E75480") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(
+    title = "Comparison of Hpred vs H_chave (Census 5)",
+    x = "H_chave (m)",
+    y = "Hpred (m)"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+This code generates the identical scatter plot as above, but for the **census 5**, allowing comparison of height estimates in that year.
+
+## Re-fitting HD Model with Custom Predicted Height
+
+```{r}
+HDmodel04_Hpred <- modelHD(
+  D = data_AGB04$DiamManCorr,
+  H = data_AGB04$Hpred,
+  method = "log2",
+  useWeight = TRUE
+)
+
+HDmodel05_Hpred <- modelHD(
+  D = data_AGB05$DiamManCorr,
+  H = data_AGB05$Hpred,
+  method = "log2",
+  useWeight = TRUE
+)
+```
+
+This block re-fits the Height-Diameter (H-D) model for both census years, but this time using the **custom predicted heights (`Hpred`)** instead of the `H_chave` estimates. This new model will be used for AGB calculations and error propagation based on the custom height function.
+
+## Re-computing AGB with Custom Predicted Height
+
+```{r}
+data_AGB04$AGB_by_Hpred <- computeAGB(
+  D = data_AGB04$DiamManCorr,
+  WD = data_AGB04$WD,
+  H = data_AGB04$Hpred 
+)
+
+data_AGB05$AGB_by_Hpred <- computeAGB(
+  D = data_AGB05$DiamManCorr,
+  WD = data_AGB05$WD,
+  H = data_AGB05$Hpred 
+)
+```
+
+This block re-calculates the **Above Ground Biomass (AGB)** for each tree using the **custom predicted heights (`Hpred`)** instead of the `H_chave` estimates.
+
+-   A new column `AGB_by_Hpred` is added to `data_AGB04` and `data_AGB05` to store these new AGB values, allowing for comparison with the previous AGB estimates.
+
+## Propagating Errors with Custom Predicted Height (Monte Carlo)
+
+These blocks repeat the Monte Carlo error propagation, but now considering the uncertainty associated with the **custom predicted heights (`Hpred`)** and their corresponding H-D models.
+
+```{r}
+D_error_prop04_Hpred <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, H = data_AGB04$Hpred,
+  Dpropag = "chave2004",
+  errWD = rep(0,nrow(data_AGB04)), errH = 0 
+)
+
+WD_error_prop04_Hpred <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, H = data_AGB04$Hpred,
+  errWD = wood_densities04$sdWD,
+  Dpropag = 0 , errH = 0 
+)
+
+H_model_error_prop04_Hpred <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr, WD = data_AGB04$WD, # we do not provide H
+  HDmodel = HDmodel04_Hpred, # but we provide HDmodel
+  Dpropag = 0 , errWD = rep(0,nrow(data_AGB04)) # no error propagation on D and WD here
+)
+
+error_prop04_Hpred <- AGBmonteCarlo(
+  D = data_AGB04$DiamManCorr,         
+  WD =  data_AGB04$WD,        
+  H =  data_AGB04$Hpred, 
+  Dpropag = "chave2004",           
+  errWD = wood_densities04$sdWD,    
+  errH = H_model_error_prop04_Hpred$sdAGB
+)
+```
+
+This block performs the individual and combined Monte Carlo error propagation for the 2004 census data, using the `Hpred` values and the `HDmodel04_Hpred`. It separately assesses errors from DBH, wood density, and the custom height model, then combines them into `error_prop04_Hpred`.
+
+```{r}
+D_error_prop05_Hpred <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, H = data_AGB05$Hpred,
+  Dpropag = "chave2004",
+  errWD = rep(0,nrow(data_AGB05)), errH = 0 
+)
+
+WD_error_prop05_Hpred <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, H = data_AGB05$Hpred,
+  errWD = wood_densities05$sdWD,
+  Dpropag = 0 , errH = 0 
+)
+
+H_model_error_prop05_Hpred <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr, WD = data_AGB05$WD, # we do not provide H
+  HDmodel = HDmodel05_Hpred, # but we provide HDmodel
+  Dpropag = 0 , errWD = rep(0,nrow(data_AGB05)) # no error propagation on D and WD here
+)
+
+error_prop05_Hpred <- AGBmonteCarlo(
+  D = data_AGB05$DiamManCorr,         
+  WD =  data_AGB05$WD,        
+  H =  data_AGB05$Hpred, 
+  Dpropag = "chave2004",           
+  errWD = wood_densities05$sdWD,    
+  errH = H_model_error_prop05_Hpred$sdAGB
+)
+```
+
+This block performs the identical Monte Carlo error propagation for the **census 5 data**, using `Hpred` values and `HDmodel05_Hpred`.
+
+## Displaying Summary of Monte Carlo Results (Hpred)
+
+```{r}
+error_prop04_Hpred[(1:4)]
+```
+
+Displays the first four elements of the `error_prop04_Hpred` object, showing the summary (mean, standard deviation, confidence intervals) of AGB estimated using the custom predicted heights and their associated propagated errors for census 4.
+
+```{r}
+error_prop05_Hpred[(1:4)]
+```
+
+Displays the first four elements of the `error_prop05_Hpred` object for the census 5.
+
+## Summarizing and Plotting AGB by Plot (Hpred)
+
+```{r}
+AGB_by_plot04_Hpred <- summaryByPlot(AGB_val = error_prop04_Hpred$AGB_simu, plot = data_AGB04$Plot, drawPlot = TRUE)
+AGB_by_plot05_Hpred <- summaryByPlot(AGB_val = error_prop05_Hpred$AGB_simu, plot = data_AGB05$Plot, drawPlot = TRUE)
+```
+
+This block summarizes the AGB estimates at the plot level using the Monte Carlo simulation results derived from `Hpred`.
+
+-   `summaryByPlot(...)`: Aggregates the simulated AGB values (`AGB_simu`) from `error_prop04_Hpred` and `error_prop05_Hpred` by plot, providing mean AGB and confidence intervals.
+
+```{r}
+
+AGB_by_plot04_Hpred$Census <- "4"
+AGB_by_plot05_Hpred$Census <- "5"
+
+AGB_combined_Hpred <- bind_rows(AGB_by_plot04_Hpred, AGB_by_plot05_Hpred)
+
+ggplot(AGB_combined_Hpred, aes(x = Census, y = AGB, color = Census)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = Cred_2.5, ymax = Cred_97.5), width = 0.2) +
+  labs(
+    title = "AGB Comparison for Plot MST",
+    x = "Census",
+    y = "AGB (Mg/ha)"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_manual(values = c("5" = "#E75480", "4" = "#2ECC71"))
+```
+
+This block prepares and visualizes the plot-level AGB with confidence intervals for both census years, specifically for the AGB estimated using `Hpred`.
+
+-   It adds a `Census` column to the plot summaries and combines them.
+
+-   A `ggplot` generates a point plot with error bars, similar to the earlier AGB comparison plot, but now reflecting the AGB calculated using the custom height prediction. This allows for a direct comparison of total AGB and its uncertainty between the two census years based on this alternative height estimation method.
+
+## Subplot Division with Custom Predicted Height (Hpred)
+
+```{r}
+subplots04_grid50_Hpred <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 50,
+  tree_data = data_AGB04, 
+  tree_coords = c("PX","PY")
+)
+
+subplots04_grid100_Hpred <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 100,
+  tree_data = data_AGB04, 
+  tree_coords = c("PX","PY")
+)
+subplots05_grid50_Hpred <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 50,
+  tree_data = data_AGB05, 
+  tree_coords = c("PX","PY")
+)
+
+subplots05_grid100_Hpred <- divide_plot(
+  corner_data = fieldplot$corner_coord, 
+  rel_coord = c("x_rel","y_rel"),
+  proj_coord = c("x_proj","y_proj"),
+  grid_size = 100,
+  tree_data = data_AGB05, 
+  tree_coords = c("PX","PY")
+)
+```
+
+This block re-divides the main plot into 50x50m and 100x100m subplots for both census years. Although the function call here uses `data_AGB04` and `data_AGB05`, which now contain `AGB_by_Hpred`, the `divide_plot` function itself primarily assigns trees to subplots based on their coordinates, not their AGB values directly. The new AGB values based on `Hpred` will be used in subsequent `subplot_summary` calls.
+
+## Summarizing AGB per Subplot with Custom Predicted Height (Hpred)
+
+```{r}
+subplot_metric04_perHA50_Hpred <- subplot_summary(
+  subplots = subplots04_grid50_Hpred,
+  value = "AGB_by_Hpred",
+  per_ha = TRUE)
+
+```
+
+```{r}
+subplot_polygons0.25_perHA_Hpred <- sf::st_set_crs(
+ subplot_metric04_perHA50_Hpred$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons0.25_perHA_Hpred,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_0.25HA_perHA_Hpred.shp")
+```
+
+This block calculates the **total AGB per hectare** for each 50x50m subplot in the 2004 census, specifically using the AGB values calculated with the **custom predicted heights (`AGB_by_Hpred`)**.
+
+```{r}
+subplot_metric04_sum50_Hpred <- subplot_summary(
+  subplots = subplots04_grid50_Hpred,
+  value = "AGB_by_Hpred",
+  fun = quantile, probs = 0.5,
+  per_ha = FALSE)
+```
+
+This block calculates the **median AGB per subplot** for the 50x50m grid in 2004.
+
+```{r}
+subplot_metric04_perHA100_Hpred <- subplot_summary(
+  subplots = subplots04_grid100_Hpred,
+  value = "AGB_by_Hpred",
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons01_perHA_Hpred <- sf::st_set_crs(
+ subplot_metric04_perHA100_Hpred$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons01_perHA_Hpred,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C4_01HA_perHA_Hpred.shp")
+```
+
+This block calculates the **total AGB per hectare** for each 100x100m subplot in the 2004 census, using `AGB_by_Hpred`.
+
+```{r}
+subplot_metric04_sum100_Hpred <- subplot_summary(
+  subplots = subplots04_grid100_Hpred,
+  value = "AGB_by_Hpred",
+  fun = quantile, probs = 0.5,
+  per_ha = FALSE)
+```
+
+This block calculates the **median AGB per subplot** for the 100x100m grid in 2004. *Note: Similar to the 50m grid, this summary uses the "AGB" column instead of "AGB_by_Hpred".*
+
+```{r}
+subplot_metric05_perHA50_Hpred <- subplot_summary(
+  subplots = subplots05_grid50_Hpred,
+  value = "AGB_by_Hpred",
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons0.25_perHA_Hpred2 <- sf::st_set_crs(
+ subplot_metric05_perHA50_Hpred$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons0.25_perHA_Hpred2,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_0.25HA_perHA_Hpred.shp")
+```
+
+This block calculates the **total AGB per hectare** for each 50x50m subplot in the Census 5, using `AGB_by_Hpred`.
+
+```{r}
+subplot_metric05_sum50_Hpred <- subplot_summary(
+  subplots = subplots05_grid50_Hpred,
+  value = "AGB_by_Hpred",
+  fun = quantile, probs = 0.5,
+  per_ha = FALSE)
+```
+
+This block calculates the **median AGB per subplot** for the 50x50m grid in Census 5.
+
+```{r}
+subplot_metric05_perHA100_Hpred <- subplot_summary(
+  subplots = subplots05_grid100_Hpred,
+  value = "AGB_by_Hpred", # AGB was added before applying divide_plot()
+  per_ha = TRUE)
+```
+
+```{r}
+subplot_polygons01_perHA_Hpred2 <- sf::st_set_crs(
+ subplot_metric05_perHA100_Hpred$polygon ,
+  value = "EPSG:32647") 
+
+sf::st_write(subplot_polygons01_perHA_Hpred2,"C:/Users/rakir/OneDrive/Desktop/AGB_Project/Field/shp/polygon_C5_01HA_perHA_Hpred.shp")
+```
+
+This block calculates the **total AGB per hectare** for each 100x100m subplot in the 2005 census, using `AGB_by_Hpred`.
+
+```{r}
+subplot_metric05_sum100_Hpred <- subplot_summary(
+  subplots = subplots05_grid100_Hpred,
+  value = "AGB_by_Hpred",
+  fun = quantile, probs = 0.5, # yes, it is the median
+  per_ha = FALSE)
+```
+
+This block calculates the **median AGB per subplot** for the 100x100m grid in census 5.
+
+## Visualizing AGB Change per Subplot (0.25 HA, Hpred)
+
+```{r}
+poly04 <- subplot_metric04_perHA50_Hpred$polygon
+poly05 <- subplot_metric05_perHA50_Hpred$polygon
+```
+
+This block retrieves the `sf` polygon objects for the 50x50m subplots from the AGB per hectare summaries calculated using `AGB_by_Hpred`.
+
+```{r}
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(AGB_change = AGB_by_Hpred_summary_per_ha_05 - AGB_by_Hpred_summary_per_ha_04)
+
+agb_map <- left_join(poly04, agb_change, by = "subplot_ID")
+
+agb_map <- poly04 %>%
+  st_drop_geometry() %>% 
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>%  dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()        
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change), color = "black") +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "AGB Change\n(Mg/ha)"
+  ) +
+  labs(title = "Change in AGB between Census 04 and Census 05 (0.25 HA)") +
+  theme_minimal()
+```
+
+This block calculates and visualizes the **change in AGB per hectare for each 50x50m subplot** between census 4 and 5, using the AGB values derived from the **custom predicted heights (`AGB_by_Hpred`)**. The process is identical to the previous AGB change map but uses the AGB values incorporating `Hpred`.
+
+```{r}
+# --- ส่วนของการเตรียมข้อมูลยังคงเดิม ---
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+# --- ปรับแก้ส่วนของการคำนวณ ---
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(
+    # คำนวณการเปลี่ยนแปลงเชิงสัมพัทธ์ (Relative Change) เป็นทศนิยม
+    # เพิ่ม ifelse เพื่อป้องกันการหารด้วยศูนย์
+    AGB_change_relative = ifelse(
+      AGB_by_Hpred_summary_per_ha_04 > 0,
+      (AGB_by_Hpred_summary_per_ha_05 - AGB_by_Hpred_summary_per_ha_04) / AGB_by_Hpred_summary_per_ha_04,
+      0
+    )
+  )
+
+# --- ส่วนของการ join กลับไปยังข้อมูล sf ยังคงเดิม ---
+agb_map <- poly04 %>%
+  st_drop_geometry() %>% 
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>%  dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()      
+
+# --- ปรับแก้ส่วนของการพล็อตกราฟ ---
+ggplot(agb_map) +
+  # เปลี่ยนมาใช้คอลัมน์ AGB_change_relative
+  geom_sf(aes(fill = AGB_change_relative), color = "black") +
+  
+  # ปรับแก้ scale เพื่อจัดรูปแบบแกนสี
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, 
+    name = "Relative AGB Change", # เปลี่ยนชื่อแกน
+    labels = scales::percent      # เพิ่มบรรทัดนี้เพื่อจัดรูปแบบเป็น %
+  ) +
+  
+  # ปรับแก้ชื่อกราฟ
+  labs(title = "Relative Change in AGB between Census 04 and Census 05 (0.25 HA)") +
+  theme_minimal()
+
+# หากยังไม่ได้ติดตั้ง package 'scales' ให้รันคำสั่งนี้ใน Console หนึ่งครั้ง:
+# install.packages("scales")
+```
+
+## Visualizing AGB Change per Subplot (1 HA, Hpred)
+
+```{r}
+poly04 <- subplot_metric04_perHA100_Hpred$polygon
+poly05 <- subplot_metric05_perHA100_Hpred$polygon
+```
+
+This block retrieves the `sf` polygon objects for the 100x100m subplots from the AGB per hectare summaries calculated using `AGB_by_Hpred`.
+
+```{r}
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(AGB_change = AGB_by_Hpred_summary_per_ha_05 - AGB_by_Hpred_summary_per_ha_04)
+
+
+agb_map <- left_join(poly04, agb_change, by = "subplot_ID")
+
+agb_map <- poly04 %>%
+  st_drop_geometry() %>%          
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>%  dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()          
+
+ggplot(agb_map) +
+  geom_sf(aes(fill = AGB_change), color = "black") +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, name = "AGB Change\n(Mg/ha)"
+  ) +
+  labs(title = "Change in AGB between Census 04 and Census 05 (1 HA)") +
+  theme_minimal()
+```
+
+This final block calculates and visualizes the **change in AGB per hectare for each 100x100m subplot** between census 4 and census 5, using the AGB values derived from the **custom predicted heights (`AGB_by_Hpred`)**. This provides a coarser-resolution spatial map of AGB change, serving as a final visualization of the forest's biomass dynamics.
+
+```{r}
+# --- Data preparation remains the same ---
+poly04_df <- st_drop_geometry(poly04)
+poly05_df <- st_drop_geometry(poly05)
+
+# --- 1. Adjust the calculation to be relative ---
+agb_change <- poly04_df %>%
+  inner_join(poly05_df, by = "subplot_ID", suffix = c("_04", "_05")) %>%
+  mutate(
+    # Calculate relative change: (new - old) / old
+    # ifelse prevents division by zero
+    AGB_change_relative = ifelse(
+      AGB_by_Hpred_summary_per_ha_04 > 0,
+      (AGB_by_Hpred_summary_per_ha_05 - AGB_by_Hpred_summary_per_ha_04) / AGB_by_Hpred_summary_per_ha_04,
+      0
+    )
+  )
+
+# --- Rejoining spatial data remains the same ---
+agb_map <- poly04 %>%
+  st_drop_geometry() %>%
+  inner_join(agb_change, by = "subplot_ID") %>%
+  left_join(poly04 %>%  dplyr::select(subplot_ID, sf_subplot_polygon), by = "subplot_ID") %>%
+  st_as_sf()
+
+# --- 2. Adjust the plot to show relative change ---
+ggplot(agb_map) +
+  # Use the new 'AGB_change_relative' column for the fill
+  geom_sf(aes(fill = AGB_change_relative), color = "black") +
+  
+  # Update the scale and add percentage labels
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "darkgreen",
+    midpoint = 0, 
+    name = "Relative AGB Change",
+    labels = scales::percent # This formats labels as percentages
+  ) +
+  
+  # Update the title
+  labs(title = "Relative Change in AGB between Census 04 and Census 05 (1 HA)") +
+  theme_minimal()
+
+# Note: You may need to run install.packages("scales") if you haven't already.
+```
+
+```{r}
+sf_subplots04_50_Hpred <- subplot_metric04_perHA50_Hpred$polygon
+sf_subplots04_100_Hpred <- subplot_metric04_perHA100_Hpred$polygon
+
+sf_subplots05_50_Hpred <- subplot_metric05_perHA50_Hpred$polygon
+sf_subplots05_100_Hpred <- subplot_metric05_perHA100_Hpred$polygon
+```
+
+```{r}
+df_100_Hpred <- bind_rows(
+  sf_subplots04_100_Hpred %>% st_drop_geometry() %>%
+    mutate(Census = 4),
+  sf_subplots05_100_Hpred %>% st_drop_geometry() %>%
+    mutate(Census = 5)
+)
+
+df_50_Hpred <- bind_rows(
+  sf_subplots04_50_Hpred %>% st_drop_geometry() %>%
+    mutate(Census = 4),
+  sf_subplots05_50_Hpred %>% st_drop_geometry() %>%
+    mutate(Census = 5)
+)
+```
+
+```{r}
+
+ggplot(df_100_Hpred, aes(x = AGB_by_Hpred_summary_per_ha, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_100_Hpred %>% group_by(Census) %>%
+               summarise(mu = mean(AGB_by_Hpred_summary_per_ha, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density Plot of AGB_Hpred per ha by Census (1 HA)",
+    x = "AGB per ha",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+
+ggplot(df_50_Hpred, aes(x = AGB_by_Hpred_summary_per_ha, fill = factor(Census), color = factor(Census))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = df_50_Hpred %>% group_by(Census) %>%
+               summarise(mu = mean(AGB_by_Hpred_summary_per_ha, na.rm = TRUE)),
+             aes(xintercept = mu, color = factor(Census)),
+             linetype = "dashed", size = 0.8) +
+  scale_fill_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  scale_color_manual(values = c("4" = "#2ECC71", "5" = "#E75480")) +
+  labs(
+    title = "Density Plot of AGB_Hpred per ha by Census (0.25 HA)",
+    x = "AGB per ha",
+    fill = "Census",
+    color = "Census"
+  ) +
+  theme_minimal()
+```
